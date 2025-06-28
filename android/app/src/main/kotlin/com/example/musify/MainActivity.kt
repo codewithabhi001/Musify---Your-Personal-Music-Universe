@@ -17,7 +17,7 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.musify/audio"
     private val TAG = "MusifyMainActivity"
-    private val PERMISSION_REQUEST_CODE = 123
+    private val PERMISSION_REQUEST_CODE = 123gg
 
     private val BLACKLISTED_DIRS =
             listOf(

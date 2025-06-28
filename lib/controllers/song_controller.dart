@@ -17,6 +17,7 @@ class SongController extends GetxController {
   static const platform = MethodChannel('com.example.musify/audio');
   int _androidSdkVersion = 0;
   bool _initialized = false;
+  final RxList allSongs = [].obs;
 
   @override
   void onInit() {
@@ -34,6 +35,12 @@ class SongController extends GetxController {
     }
   }
 
+
+  /// Reset filtered songs back to original songs list
+  void resetSearch() {
+    filteredSongs.value = List<SongModel>.from(songs);
+  }
+
   Future<void> _initAudio() async {
     try {
       if (Platform.isAndroid) {
@@ -45,6 +52,7 @@ class SongController extends GetxController {
       debugPrint('Audio initialization error: $e');
     }
   }
+
 
   Future<void> _loadPreferences() async {
     try {
