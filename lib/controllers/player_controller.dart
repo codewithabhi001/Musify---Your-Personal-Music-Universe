@@ -73,6 +73,12 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     }
   }
 
+  // Existing stream getter
+  Stream<bool> get playingStream => _player.playingStream;
+
+  // New stream getter for currentSong
+  Stream<SongModel?> get currentSongStream => currentSong.stream;
+
   Future<void> play(SongModel song) async {
     if (!_initialized) return;
     try {
