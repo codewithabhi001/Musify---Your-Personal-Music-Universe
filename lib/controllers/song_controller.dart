@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:audiotags/audiotags.dart';
 import '../model/song_model.dart';
+
+enum SortType { nameAsc, nameDesc, artist, recent }
 
 class SongController extends GetxController {
   final songs = <SongModel>[].obs;
@@ -16,122 +18,78 @@ class SongController extends GetxController {
   final permissionGranted = false.obs;
   static const platform = MethodChannel('com.example.musify/audio');
   int _androidSdkVersion = 0;
-  bool _initialized = false;
+
+  // Cache for album arts and colors
+  final Map<String, Uint8List?> _albumArtCache = {};
+  final Map<String, Map<String, Color>> _colorCache = {};
 
   @override
   void onInit() {
     super.onInit();
-    _initializeApp();
+    _initialize();
   }
 
-  Future<void> _initializeApp() async {
-    await _initAudio();
-    await _loadPreferences();
-    if (Platform.isAndroid) {
-      await _checkAndRequestPermissions();
-    } else {
-      await _loadSongs();
+  Future<void> _initialize() async {
+    try {
+      await _initDeviceInfo();
+      await _handlePermissions();
+    } catch (e) {
+      debugPrint('Initialization error: $e');
     }
   }
 
-  Future<void> _initAudio() async {
+  Future<void> _initDeviceInfo() async {
     try {
       if (Platform.isAndroid) {
-        final deviceInfo = await DeviceInfoPlugin().androidInfo;
-        _androidSdkVersion = deviceInfo.version.sdkInt;
+        final info = await DeviceInfoPlugin().androidInfo;
+        _androidSdkVersion = info.version.sdkInt ?? 0;
       }
-      _initialized = true;
     } catch (e) {
-      debugPrint('Audio initialization error: $e');
+      _androidSdkVersion = 0;
     }
   }
 
-  Future<void> _loadPreferences() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      // No specific preferences to load here, can be extended if needed
-    } catch (e) {
-      debugPrint('Error loading preferences: $e');
-    }
-  }
-
-  Future<void> _checkAndRequestPermissions() async {
+  Future<void> _handlePermissions() async {
     if (!Platform.isAndroid) {
       permissionGranted.value = true;
+      await _loadSongs();
       return;
     }
+
+    Permission permission =
+        _androidSdkVersion >= 33 ? Permission.audio : Permission.storage;
+
     try {
-      PermissionStatus status = _androidSdkVersion >= 33
-          ? await Permission.audio.status
-          : await Permission.storage.status;
-      if (status.isGranted) {
-        permissionGranted.value = true;
-        await _loadSongs();
-        return;
-      }
-      status = _androidSdkVersion >= 33
-          ? await Permission.audio.request()
-          : await Permission.storage.request();
+      final status = await permission.status;
       if (status.isGranted) {
         permissionGranted.value = true;
         await _loadSongs();
       } else {
-        permissionGranted.value = false;
-        _showPermissionDialog(status);
+        final newStatus = await permission.request();
+        permissionGranted.value = newStatus.isGranted;
+        if (newStatus.isGranted) {
+          await _loadSongs();
+        }
       }
     } catch (e) {
-      debugPrint('Permission check error: $e');
       permissionGranted.value = false;
+      debugPrint('Permission error: $e');
     }
   }
 
-  void _showPermissionDialog(PermissionStatus status) {
-    Get.dialog(
-      AlertDialog(
-        title: const Text('Permission Required'),
-        content: Text(
-          status.isPermanentlyDenied
-              ? 'Please enable storage/audio permission in app settings to load your music.'
-              : 'This app needs storage/audio permission to access your music files.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Get.back();
-              if (status.isPermanentlyDenied) {
-                await openAppSettings();
-              } else {
-                await _checkAndRequestPermissions();
-              }
-            },
-            child: Text(status.isPermanentlyDenied ? 'Settings' : 'Allow'),
-          ),
-        ],
-      ),
-      barrierDismissible: false,
-    );
-  }
-
   Future<void> _loadSongs() async {
-    if (!_initialized) return;
     isLoading.value = true;
     try {
       await _loadCachedSongs();
       if (Platform.isAndroid && permissionGranted.value) {
-        await _fetchSongsFromDevice();
+        await _fetchSongs();
       }
-      _updateFilteredLists();
-      sortSongs(SortType.nameAsc);
+      filteredSongs.assignAll(songs);
+      _sortSongsSync(SortType.nameAsc);
       await _cacheSongs();
+      await _preloadAlbumArts();
     } catch (e) {
-      debugPrint('Error loading songs: $e');
-      if (permissionGranted.value) {
-        Get.snackbar('Error', 'Failed to load songs');
-      }
+      debugPrint('Load songs error: $e');
     } finally {
       isLoading.value = false;
     }
@@ -140,134 +98,185 @@ class SongController extends GetxController {
   Future<void> _loadCachedSongs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final cachedSongs = prefs.getStringList('cachedSongs') ?? [];
-      if (cachedSongs.isNotEmpty) {
-        final validSongs = <SongModel>[];
-        for (int i = 0; i < cachedSongs.length; i++) {
-          final parts = cachedSongs[i].split('|');
-          if (parts.length >= 2 && File(parts[0]).existsSync()) {
-            validSongs.add(SongModel(
-              title: parts[1],
-              artist: parts.length > 2 && parts[2].isNotEmpty ? parts[2] : null,
-              path: parts[0],
-              id: i,
-              dateAdded: DateTime.now().millisecondsSinceEpoch,
-              albumArt: null,
-              album: parts.length > 3 && parts[3].isNotEmpty ? parts[3] : null,
-            ));
-          }
+      final cached = prefs.getStringList('cachedSongs') ?? [];
+      final validSongs = <SongModel>[];
+
+      for (int i = 0; i < cached.length; i++) {
+        final parts = cached[i].split('|');
+        if (parts.length >= 2) {
+          validSongs.add(SongModel(
+            id: i,
+            path: parts[0],
+            title: parts[1],
+            artist: parts.length > 2 && parts[2].isNotEmpty ? parts[2] : null,
+            album: parts.length > 3 && parts[3].isNotEmpty ? parts[3] : null,
+            dateAdded: DateTime.now().millisecondsSinceEpoch,
+            albumArt: null,
+          ));
         }
-        songs.value = validSongs;
       }
+      songs.value = validSongs;
     } catch (e) {
-      debugPrint('Error loading cached songs: $e');
+      debugPrint('Load cached songs error: $e');
     }
   }
 
-  Future<void> _fetchSongsFromDevice() async {
+  Future<void> _fetchSongs() async {
     try {
-      final List<dynamic>? nativeSongs =
-          await platform.invokeListMethod('getSongs');
-      if (nativeSongs != null && nativeSongs.isNotEmpty) {
-        final newSongs = <SongModel>[];
-        for (var i = 0; i < nativeSongs.length; i++) {
-          final song = nativeSongs[i] as Map<dynamic, dynamic>;
-          final path = song['path']?.toString();
-          if (path != null && File(path).existsSync()) {
-            final albumArt = await _loadAlbumArt(path);
-            newSongs.add(SongModel(
-              title: song['title']?.toString() ?? path.substringAfterLast('/'),
-              artist: song['artist']?.toString(),
-              path: path,
-              id: i,
-              dateAdded: int.tryParse(song['dateAdded']?.toString() ?? '') ??
-                  DateTime.now().millisecondsSinceEpoch,
-              albumArt: albumArt,
-              album: song['album']?.toString(),
-            ));
-          }
-        }
-        if (newSongs.isNotEmpty) {
-          songs.value = newSongs;
-        }
+      final nativeSongs = await platform.invokeListMethod('getSongs');
+      if (nativeSongs == null) return;
+
+      final newSongs = <SongModel>[];
+      for (int i = 0; i < nativeSongs.length; i++) {
+        final song = nativeSongs[i] as Map<dynamic, dynamic>;
+        final path = song['path']?.toString();
+        if (path == null) continue;
+
+        newSongs.add(SongModel(
+          id: i,
+          path: path,
+          title: song['title']?.toString() ?? path.split('/').last,
+          artist: song['artist']?.toString(),
+          album: song['album']?.toString(),
+          dateAdded: int.tryParse(song['dateAdded']?.toString() ?? '') ??
+              DateTime.now().millisecondsSinceEpoch,
+          albumArt: null,
+        ));
       }
+      songs.value = newSongs;
     } catch (e) {
-      debugPrint('Error fetching songs from device: $e');
+      debugPrint('Fetch songs error: $e');
     }
   }
 
-  Future<Uint8List?> _loadAlbumArt(String path) async {
+  Future<void> _preloadAlbumArts() async {
+    for (var song in songs) {
+      if (!_albumArtCache.containsKey(song.path)) {
+        await loadAlbumArt(song.path);
+      }
+    }
+  }
+
+  Future<Uint8List?> loadAlbumArt(String path) async {
+    if (_albumArtCache.containsKey(path)) {
+      debugPrint('Returning cached album art for: $path');
+      return _albumArtCache[path];
+    }
+
     try {
       final tag = await AudioTags.read(path);
-      if (tag?.pictures.isNotEmpty == true) {
-        return tag!.pictures.first.bytes;
+      final bytes = tag?.pictures.firstOrNull?.bytes;
+      _albumArtCache[path] = bytes;
+
+      debugPrint('Loaded album art for $path: ${bytes?.length} bytes');
+
+      // Cache colors if album art is available
+      if (bytes != null && bytes.isNotEmpty) {
+        _colorCache[path] = await _extractColors(bytes);
+      } else {
+        _colorCache[path] = _getDefaultColorMap();
       }
+
+      return bytes;
     } catch (e) {
-      debugPrint('Error loading album art for $path: $e');
+      debugPrint('Album art load error for $path: $e');
+      _albumArtCache[path] = null;
+      _colorCache[path] = _getDefaultColorMap();
+      return null;
     }
-    return null;
+  }
+
+  Future<Map<String, Color>> _extractColors(Uint8List? data) async {
+    if (data == null || data.isEmpty) return _getDefaultColorMap();
+
+    try {
+      // Placeholder for color extraction (already implemented in your code)
+      return {
+        'dominant': const Color(0xFF2A2A2A),
+        'accent': const Color(0xFF3A3A3A),
+      };
+    } catch (e) {
+      debugPrint('Color extraction error: $e');
+      return _getDefaultColorMap();
+    }
+  }
+
+  Map<String, Color> _getDefaultColorMap() {
+    return {
+      'dominant': const Color(0xFF2A2A2A),
+      'accent': const Color(0xFF3A3A3A),
+    };
+  }
+
+  Map<String, Color> getCachedColors(String path) {
+    return _colorCache[path] ?? _getDefaultColorMap();
   }
 
   Future<void> _cacheSongs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final cache = songs
+      final list = songs
           .map((s) => '${s.path}|${s.title}|${s.artist ?? ''}|${s.album ?? ''}')
           .toList();
-      await prefs.setStringList('cachedSongs', cache);
+      await prefs.setStringList('cachedSongs', list);
     } catch (e) {
-      debugPrint('Error caching songs: $e');
+      debugPrint('Cache songs error: $e');
     }
   }
 
-  void _updateFilteredLists() {
-    filteredSongs.value = List<SongModel>.from(songs);
-  }
-
   void searchSongs(String query) {
-    final lowerQuery = query.toLowerCase();
+    final q = query.toLowerCase();
     filteredSongs.value = query.isEmpty
-        ? List<SongModel>.from(songs)
+        ? List.from(songs)
         : songs
-            .where((song) =>
-                song.title.toLowerCase().contains(lowerQuery) ||
-                (song.artist?.toLowerCase().contains(lowerQuery) ?? false))
+            .where((s) =>
+                s.title.toLowerCase().contains(q) ||
+                (s.artist?.toLowerCase().contains(q) ?? false))
             .toList();
-    sortSongs(SortType.nameAsc);
+    _sortSongsSync(SortType.nameAsc);
   }
 
   void sortSongs(SortType type) {
-    final sorted = List<SongModel>.from(filteredSongs);
-    _sortList(sorted, type);
-    filteredSongs.value = sorted;
+    _sortSongsSync(type);
   }
 
-  void _sortList(List<SongModel> list, SortType type) {
-    list.sort((a, b) {
-      switch (type) {
-        case SortType.nameAsc:
-          return a.title.toLowerCase().compareTo(b.title.toLowerCase());
-        case SortType.nameDesc:
-          return b.title.toLowerCase().compareTo(a.title.toLowerCase());
-        case SortType.artist:
-          return (a.artist ?? 'Unknown')
-              .toLowerCase()
-              .compareTo((b.artist ?? 'Unknown').toLowerCase());
-        case SortType.recent:
-          return (b.dateAdded ?? 0).compareTo(a.dateAdded ?? 0);
-      }
-    });
+  void _sortSongsSync(SortType type) {
+    switch (type) {
+      case SortType.nameAsc:
+        filteredSongs.sort((a, b) => a.title.compareTo(b.title));
+        break;
+      case SortType.nameDesc:
+        filteredSongs.sort((a, b) => b.title.compareTo(a.title));
+        break;
+      case SortType.artist:
+        filteredSongs
+            .sort((a, b) => (a.artist ?? '').compareTo(b.artist ?? ''));
+        break;
+      case SortType.recent:
+        filteredSongs
+            .sort((a, b) => (b.dateAdded ?? 0).compareTo(a.dateAdded ?? 0));
+        break;
+    }
   }
 
   Future<void> refreshSongs() async {
     if (!permissionGranted.value) {
-      await _checkAndRequestPermissions();
+      await _handlePermissions();
       return;
     }
+
     isLoading.value = true;
-    songs.clear();
-    filteredSongs.clear();
-    await _loadSongs();
+    try {
+      songs.clear();
+      filteredSongs.clear();
+      _albumArtCache.clear();
+      _colorCache.clear();
+      await _loadSongs();
+    } catch (e) {
+      debugPrint('Refresh songs error: $e');
+    } finally {
+      isLoading.value = false;
+    }
   }
 
   List<SongModel> getSongsByAlbum(String album) {
@@ -282,39 +291,42 @@ class SongController extends GetxController {
         .toList();
   }
 
-  // Added getAlbumArt method
-  Widget getAlbumArt({double? width, double? height, SongModel? song}) {
-    final targetSong = song ?? (songs.isNotEmpty ? songs.first : null);
+  Widget getAlbumArt({SongModel? song, double? width, double? height}) {
+    final s = song ?? songs.firstOrNull;
     final size = width ?? 54;
 
-    return targetSong?.albumArt != null
-        ? ClipRRect(
+    if (s == null) return _defaultAlbumArt(size, height);
+
+    return FutureBuilder<Uint8List?>(
+      future: loadAlbumArt(s.path),
+      builder: (context, snapshot) {
+        if (snapshot.hasData && snapshot.data != null) {
+          return ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Image.memory(
-              targetSong!.albumArt!,
+              snapshot.data!,
               width: size,
               height: height ?? size,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) =>
                   _defaultAlbumArt(size, height),
             ),
-          )
-        : _defaultAlbumArt(size, height);
+          );
+        }
+        return _defaultAlbumArt(size, height);
+      },
+    );
   }
 
-  Widget _defaultAlbumArt(double width, double? height) {
+  Widget _defaultAlbumArt(double size, double? height) {
     return Container(
-      width: width,
-      height: height ?? width,
+      width: size,
+      height: height ?? size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
         color: Colors.grey.shade800,
       ),
-      child: Icon(
-        Icons.music_note,
-        size: width * 0.5,
-        color: Colors.white,
-      ),
+      child: Icon(Icons.music_note, color: Colors.white, size: size * 0.5),
     );
   }
 }

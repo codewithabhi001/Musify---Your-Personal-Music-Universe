@@ -66,7 +66,7 @@ class FavoritesWidget extends StatelessWidget {
                           onPressed: () =>
                               favoriteController.toggleFavorite(song.path),
                         ),
-                        onTap: () => playerController.play(song),
+                        onTap: () => playerController.play(),
                       );
                     },
                   ),
@@ -149,7 +149,7 @@ class FavoriteSearchDelegate extends SearchDelegate {
                         onPressed: () =>
                             favoriteController.toggleFavorite(song.path),
                       ),
-                      onTap: () => playerController.play(song),
+                      onTap: () => playerController.play(),
                     );
                   },
                 ),

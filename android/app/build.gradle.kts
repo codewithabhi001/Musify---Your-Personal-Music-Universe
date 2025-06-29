@@ -1,12 +1,10 @@
-import org.gradle.api.file.Directory
-
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// ✅ Get Kotlin version from root project
+// Get Kotlin version from root project
 val kotlin_version: String by rootProject.extra
 
 android {
@@ -25,7 +23,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.musify"
-        minSdk = 21
+        minSdk = 23 // Updated to 23 for awesome_notifications compatibility
         targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -39,7 +37,7 @@ android {
 
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("debug") // 👈 Use your actual release key here
+            signingConfig = signingConfigs.getByName("debug") // Use your actual release key here
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

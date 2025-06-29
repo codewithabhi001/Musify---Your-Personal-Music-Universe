@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:audio_session/audio_session.dart';
 import 'package:get/get.dart';
 import 'package:musify/controllers/song_controller.dart';
+import 'package:musify/service/notification_service.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../model/song_model.dart';
 
-class PlayerController extends GetxController with WidgetsBindingObserver {
+class PlayerController extends GetxController {
   final AudioPlayer _player = AudioPlayer();
   final isPlaying = false.obs;
   final currentSong = Rxn<SongModel>();
@@ -18,172 +19,346 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
   final isShuffling = false.obs;
   final isLooping = false.obs;
   final volume = 1.0.obs;
+  final isBuffering = false.obs;
 
+  final SongController _songController = Get.find<SongController>();
+  late NotificationService _notificationService;
   bool _initialized = false;
+  List<int> _shuffledIndices = [];
+  int _currentShuffleIndex = 0;
+
   StreamSubscription? _positionSub;
   StreamSubscription? _playingSub;
   StreamSubscription? _durationSub;
-  StreamSubscription? _completionSub;
+  StreamSubscription? _playerStateSub;
 
-  @override
-  void onInit() {
-    super.onInit();
-    WidgetsBinding.instance.addObserver(this);
-    _initializeAudio();
+  PlayerController() {
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      _notificationService = Get.find<NotificationService>();
+      await _initializeAudio();
+      await _loadSavedState();
+    } catch (e) {
+      debugPrint('Error initializing player: $e');
+      Get.snackbar('Error', 'Failed to initialize player',
+          snackPosition: SnackPosition.BOTTOM);
+    }
   }
 
   Future<void> _initializeAudio() async {
+    if (_initialized) return;
+
     try {
-      final session = await AudioSession.instance;
-      await session.configure(const AudioSessionConfiguration.music());
       await _player.setVolume(volume.value);
 
       _playingSub = _player.playingStream.listen((playing) {
         isPlaying.value = playing;
+        _notificationService.updateNotification();
       });
 
       _durationSub = _player.durationStream.listen((d) {
-        if (d != null &&
-            d.inMilliseconds > 0 &&
-            d.inMilliseconds < Duration(hours: 24).inMilliseconds) {
+        if (d != null && d.inMilliseconds > 0) {
           duration.value = d;
-        } else {
-          duration.value = Duration.zero;
+          _notificationService.updateNotification();
         }
       });
 
       _positionSub = _player.positionStream.listen((p) {
-        if (duration.value.inMilliseconds > 0 &&
-            p.inMilliseconds > duration.value.inMilliseconds) {
-          position.value = duration.value;
-        } else {
+        if (p.inMilliseconds <= duration.value.inMilliseconds) {
           position.value = p;
+          _notificationService.updateNotification();
         }
       });
 
-      _completionSub = _player.playerStateStream.listen((state) {
+      _playerStateSub = _player.playerStateStream.listen((state) {
+        isBuffering.value =
+            state.processingState == ProcessingState.buffering ||
+                state.processingState == ProcessingState.loading;
         if (state.processingState == ProcessingState.completed) {
-          playNext();
+          handleSongCompletion();
         }
+        _notificationService.updateNotification();
       });
 
       _initialized = true;
     } catch (e) {
       debugPrint('Audio initialization error: $e');
+      Get.snackbar('Error', 'Failed to initialize audio player',
+          snackPosition: SnackPosition.BOTTOM);
     }
   }
 
-  Future<void> play(SongModel song) async {
-    if (!_initialized) return;
+  Future<void> playSong(SongModel song) async {
+    if (!_initialized) {
+      await _initializeAudio();
+    }
+
     try {
       if (!File(song.path).existsSync()) {
-        Get.snackbar('Error', 'Song file not found');
+        Get.snackbar('Error', 'Song file not found',
+            snackPosition: SnackPosition.BOTTOM);
         return;
       }
 
-      if (currentSong.value?.path == song.path && _player.playing) return;
-
-      await _player.stop();
-      currentSong.value = song;
-      duration.value = Duration.zero;
-      position.value = Duration.zero;
-
-      await _player.setAudioSource(AudioSource.uri(Uri.file(song.path)));
-
-      // Wait for duration
-      int attempts = 0;
-      while (duration.value.inMilliseconds == 0 && attempts < 20) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        attempts++;
+      if (currentSong.value?.path == song.path && _player.playing) {
+        return;
       }
 
+      if (currentSong.value?.path == song.path && !_player.playing) {
+        await resume();
+        return;
+      }
+
+      isBuffering.value = true;
+      await _player.stop();
+
+      currentSong.value = song;
+      position.value = Duration.zero;
+      duration.value = Duration.zero;
+
+      await _player.setAudioSource(AudioSource.uri(Uri.file(song.path)));
       await _player.play();
-      isPlaying.value = true;
+      isBuffering.value = false;
+
+      if (isShuffling.value) {
+        final currentIndex = _songController.songs.indexOf(song);
+        if (_shuffledIndices.isEmpty && currentIndex != -1) {
+          _generateShuffledIndices();
+        } else if (currentIndex != -1) {
+          _currentShuffleIndex = _shuffledIndices.indexOf(currentIndex);
+        }
+      }
+
       await _saveState();
+      await _notificationService.showMediaNotification(
+        title: song.title,
+        artist: song.artist ?? 'Unknown Artist',
+        album: song.album,
+        imagePath: song.path,
+        isPlaying: _player.playing,
+      );
     } catch (e) {
       debugPrint('Play error: $e');
-      Get.snackbar('Error', 'Cannot play this song');
+      Get.snackbar('Error', 'Cannot play this song',
+          snackPosition: SnackPosition.BOTTOM);
+      isBuffering.value = false;
     }
   }
 
-  Future<void> playNext() async {
-    final songCtrl = Get.find<SongController>();
-    if (songCtrl.songs.isEmpty || currentSong.value == null) return;
-    final currentIndex = songCtrl.songs.indexOf(currentSong.value!);
-    final nextIndex = (currentIndex + 1) % songCtrl.songs.length;
-    await play(songCtrl.songs[nextIndex]);
+  void _generateShuffledIndices() {
+    if (_songController.songs.isEmpty) return;
+
+    _shuffledIndices =
+        List.generate(_songController.songs.length, (index) => index);
+    _shuffledIndices.shuffle(Random());
+
+    if (currentSong.value != null) {
+      final currentIndex = _songController.songs.indexOf(currentSong.value!);
+      if (currentIndex != -1) {
+        _shuffledIndices.remove(currentIndex);
+        _shuffledIndices.insert(0, currentIndex);
+        _currentShuffleIndex = 0;
+      }
+    }
   }
 
-  Future<void> playPrevious() async {
-    final songCtrl = Get.find<SongController>();
-    if (songCtrl.songs.isEmpty || currentSong.value == null) return;
-    final currentIndex = songCtrl.songs.indexOf(currentSong.value!);
-    final prevIndex =
-        currentIndex == 0 ? songCtrl.songs.length - 1 : currentIndex - 1;
-    await play(songCtrl.songs[prevIndex]);
+  void handleSongCompletion() {
+    if (isLooping.value) {
+      _player.seek(Duration.zero);
+      _player.play();
+    } else {
+      skipToNext();
+    }
+  }
+
+  Future<void> play() async {
+    if (currentSong.value != null) {
+      await _player.play();
+      _notificationService.updateNotification();
+    }
   }
 
   Future<void> pause() async {
-    await _player.pause();
-    isPlaying.value = false;
-  }
-
-  Future<void> resume() async {
-    await _player.play();
-    isPlaying.value = true;
+    if (_player.playing) {
+      await _player.pause();
+      _notificationService.updateNotification();
+    }
   }
 
   Future<void> stop() async {
     await _player.stop();
-    isPlaying.value = false;
     position.value = Duration.zero;
-    duration.value = Duration.zero;
     currentSong.value = null;
-
-    // Release audio session focus
-    final session = await AudioSession.instance;
-    await session.setActive(false);
+    await _notificationService.clearNotification();
   }
 
   Future<void> seek(Duration pos) async {
-    if (duration.value.inMilliseconds > 0 &&
-        pos.inMilliseconds > duration.value.inMilliseconds) {
-      pos = duration.value;
-    }
-    await _player.seek(pos);
-    position.value = pos;
+    final clampedPos = pos < Duration.zero
+        ? Duration.zero
+        : (pos > duration.value ? duration.value : pos);
+    await _player.seek(clampedPos);
+    _notificationService.updateNotification();
   }
 
-  void toggleShuffle() {
+  Future<void> skipToNext() async {
+    if (_songController.songs.isEmpty) return;
+
+    if (currentSong.value == null) {
+      await playSong(_songController.songs.first);
+      return;
+    }
+
+    int nextIndex;
+
+    if (isShuffling.value) {
+      if (_shuffledIndices.isEmpty) {
+        _generateShuffledIndices();
+      }
+
+      _currentShuffleIndex =
+          (_currentShuffleIndex + 1) % _shuffledIndices.length;
+
+      if (_currentShuffleIndex == 0) {
+        _generateShuffledIndices();
+      }
+
+      nextIndex = _shuffledIndices[_currentShuffleIndex];
+    } else {
+      final currentIndex = _songController.songs.indexOf(currentSong.value!);
+      nextIndex = (currentIndex + 1) % _songController.songs.length;
+    }
+
+    await playSong(_songController.songs[nextIndex]);
+  }
+
+  Future<void> skipToPrevious() async {
+    if (_songController.songs.isEmpty) return;
+
+    if (currentSong.value == null) {
+      await playSong(_songController.songs.last);
+      return;
+    }
+
+    if (position.value.inSeconds > 3) {
+      await seek(Duration.zero);
+      return;
+    }
+
+    int prevIndex;
+
+    if (isShuffling.value) {
+      if (_shuffledIndices.isEmpty) {
+        _generateShuffledIndices();
+      }
+
+      _currentShuffleIndex = _currentShuffleIndex == 0
+          ? _shuffledIndices.length - 1
+          : _currentShuffleIndex - 1;
+
+      prevIndex = _shuffledIndices[_currentShuffleIndex];
+    } else {
+      final currentIndex = _songController.songs.indexOf(currentSong.value!);
+      prevIndex = currentIndex == 0
+          ? _songController.songs.length - 1
+          : currentIndex - 1;
+    }
+
+    await playSong(_songController.songs[prevIndex]);
+  }
+
+  Future<void> skipToQueueItem(int index) async {
+    if (index < 0 || index >= _songController.songs.length) return;
+    await playSong(_songController.songs[index]);
+  }
+
+  Future<void> togglePlayPause() async {
+    if (_player.playing) {
+      await pause();
+    } else {
+      await resume();
+    }
+  }
+
+  Future<void> resume() async {
+    if (!_player.playing && currentSong.value != null) {
+      await _player.play();
+      _notificationService.updateNotification();
+    }
+  }
+
+  Future<void> toggleShuffle() async {
     isShuffling.value = !isShuffling.value;
-    _player.setShuffleModeEnabled(isShuffling.value);
-    _saveState();
-  }
+    await _player.setShuffleModeEnabled(isShuffling.value);
 
-  void toggleLoop() {
-    isLooping.value = !isLooping.value;
-    _player.setLoopMode(isLooping.value ? LoopMode.one : LoopMode.off);
-    _saveState();
-  }
-
-  Future<void> shareSong(String path) async {
-    try {
-      final file = XFile(path);
-      await Share.shareXFiles([file], text: 'Check out this song!');
-    } catch (e) {
-      debugPrint('Share error: $e');
-      Get.snackbar('Error', 'Failed to share song');
+    if (isShuffling.value) {
+      _generateShuffledIndices();
+    } else {
+      _shuffledIndices.clear();
+      _currentShuffleIndex = 0;
     }
+
+    await _saveState();
+    _notificationService.updateNotification();
+  }
+
+  Future<void> toggleLoop() async {
+    isLooping.value = !isLooping.value;
+    await _player.setLoopMode(isLooping.value ? LoopMode.one : LoopMode.off);
+    await _saveState();
+    _notificationService.updateNotification();
   }
 
   Future<void> setVolume(double val) async {
     volume.value = val.clamp(0.0, 1.0);
     await _player.setVolume(volume.value);
     await _saveState();
+    _notificationService.updateNotification();
+  }
+
+  Future<void> shareSong() async {
+    if (currentSong.value == null) return;
+
+    try {
+      final file = XFile(currentSong.value!.path);
+      await Share.shareXFiles([file],
+          text: 'Check out this song: ${currentSong.value!.title}');
+    } catch (e) {
+      debugPrint('Share error: $e');
+      Get.snackbar('Error', 'Failed to share song',
+          snackPosition: SnackPosition.BOTTOM);
+    }
+  }
+
+  Future<void> _loadSavedState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      isShuffling.value = prefs.getBool('isShuffling') ?? false;
+      isLooping.value = prefs.getBool('isLooping') ?? false;
+      volume.value = prefs.getDouble('volume') ?? 1.0;
+
+      await _player.setShuffleModeEnabled(isShuffling.value);
+      await _player.setLoopMode(isLooping.value ? LoopMode.one : LoopMode.off);
+      await _player.setVolume(volume.value);
+
+      final lastSongPath = prefs.getString('currentSong');
+      if (lastSongPath != null && lastSongPath.isNotEmpty) {
+        final song = _songController.songs
+            .firstWhereOrNull((s) => s.path == lastSongPath);
+        if (song != null) {
+          await playSong(song);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading saved state: $e');
+    }
   }
 
   String formatDuration(Duration d) {
     if (d.inMilliseconds <= 0) return '0:00';
+
     final totalSeconds = d.inSeconds;
     final hours = totalSeconds ~/ 3600;
     final minutes = (totalSeconds % 3600) ~/ 60;
@@ -191,9 +366,8 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
 
     if (hours > 0) {
       return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    } else {
-      return '$minutes:${seconds.toString().padLeft(2, '0')}';
     }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   double get progress {
@@ -204,6 +378,9 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
 
   String get formattedPosition => formatDuration(position.value);
   String get formattedDuration => formatDuration(duration.value);
+
+  bool get hasNext => _songController.songs.isNotEmpty;
+  bool get hasPrevious => _songController.songs.isNotEmpty;
 
   Future<void> _saveState() async {
     try {
@@ -218,24 +395,13 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) async {
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
-      await stop(); // stop and release memory
-    }
-  }
-
-  @override
-  void onClose() {
-    WidgetsBinding.instance.removeObserver(this);
-
+  void dispose() {
     _positionSub?.cancel();
     _durationSub?.cancel();
     _playingSub?.cancel();
-    _completionSub?.cancel();
-
+    _playerStateSub?.cancel();
     _player.dispose();
-
-    super.onClose();
+    _notificationService.dispose();
+    super.dispose();
   }
 }

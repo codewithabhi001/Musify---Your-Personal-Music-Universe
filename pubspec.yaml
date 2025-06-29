@@ -7,8 +7,10 @@ environment:
   sdk: ^3.5.2
 
 dependencies:
+  audio_service: ^0.18.18
   audio_session: ^0.1.21
   audiotags: ^1.4.5
+  awesome_notifications: ^0.10.1
   content_resolver: ^0.3.3
   cupertino_icons: ^1.0.8
   device_info_plus: ^11.1.0

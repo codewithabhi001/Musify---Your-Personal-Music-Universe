@@ -148,7 +148,7 @@ class MiniPlayer extends StatelessWidget {
                         ),
                       ),
                       _buildControlButton(context, Icons.skip_previous,
-                          playerController!.playPrevious),
+                          playerController!.skipToPrevious),
                       _buildControlButton(
                         context,
                         playerController!.isPlaying.value
@@ -159,8 +159,8 @@ class MiniPlayer extends StatelessWidget {
                             : playerController!.resume(),
                         isPlayButton: true,
                       ),
-                      _buildControlButton(
-                          context, Icons.skip_next, playerController!.playNext),
+                      _buildControlButton(context, Icons.skip_next,
+                          playerController!.skipToNext),
                     ],
                   ),
                 ),

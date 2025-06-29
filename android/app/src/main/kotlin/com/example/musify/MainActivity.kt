@@ -1,7 +1,6 @@
 package com.example.musify
 
 import android.Manifest
-import android.content.ContentResolver
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.os.Build
@@ -9,12 +8,12 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
-class MainActivity : FlutterActivity() {
+class MainActivity : AudioServiceActivity() {
     private val CHANNEL = "com.example.musify/audio"
     private val TAG = "MusifyMainActivity"
     private val PERMISSION_REQUEST_CODE = 123
@@ -95,24 +94,25 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun hasStoragePermission(): Boolean {
-        val permission =
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    Manifest.permission.READ_MEDIA_AUDIO
-                } else {
-                    Manifest.permission.READ_EXTERNAL_STORAGE
+        val permissions =
+                when {
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                            arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+                    else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
                 }
-        return ContextCompat.checkSelfPermission(this, permission) ==
-                PackageManager.PERMISSION_GRANTED
+        return permissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private fun requestStoragePermission() {
-        val permission =
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    Manifest.permission.READ_MEDIA_AUDIO
-                } else {
-                    Manifest.permission.READ_EXTERNAL_STORAGE
+        val permissions =
+                when {
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                            arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+                    else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
                 }
-        ActivityCompat.requestPermissions(this, arrayOf(permission), PERMISSION_REQUEST_CODE)
+        ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE)
     }
 
     override fun onRequestPermissionsResult(
@@ -123,18 +123,19 @@ class MainActivity : FlutterActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_CODE &&
                         grantResults.isNotEmpty() &&
-                        grantResults[0] == PackageManager.PERMISSION_GRANTED
+                        grantResults.all { it == PackageManager.PERMISSION_GRANTED }
         ) {
-            MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, CHANNEL)
-                    .invokeMethod("retryFetchSongs", null)
+            flutterEngine?.let {
+                MethodChannel(it.dartExecutor.binaryMessenger, CHANNEL)
+                        .invokeMethod("retryFetchSongs", null)
+            }
+                    ?: Log.e(TAG, "Flutter engine is null during permission result")
         }
     }
 
     private fun getSongsFromMediaStore(): List<Map<String, Any?>> {
         val songs = mutableListOf<Map<String, Any?>>()
-        val contentResolver: ContentResolver = contentResolver
         val uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-
         val projection =
                 arrayOf(
                         MediaStore.Audio.Media.DATA,
@@ -144,7 +145,6 @@ class MainActivity : FlutterActivity() {
                         MediaStore.Audio.Media.DATE_ADDED,
                         MediaStore.Audio.Media.DURATION
                 )
-
         val selection =
                 "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= 10000"
 
@@ -163,43 +163,39 @@ class MainActivity : FlutterActivity() {
                 }
 
         cursor?.use {
-            val pathColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-            val titleColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artistColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val dateAddedColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
-            val durationColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            val pathCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+            val titleCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+            val artistCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+            val albumCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+            val dateCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+            val durationCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
 
             while (it.moveToNext()) {
-                val path = it.getString(pathColumn) ?: continue
+                val path = it.getString(pathCol) ?: continue
                 val file = File(path)
-                if (!file.exists() || file.length() < 1024 * 50) continue
+                if (!file.exists() || file.length() < 50 * 1024) continue
 
-                if (BLACKLISTED_DIRS.any { dir -> path.contains("/$dir/", ignoreCase = true) } ||
-                                BLACKLISTED_EXTENSIONS.contains(
-                                        path.substringAfterLast('.', "").lowercase()
-                                )
-                ) {
-                    continue
-                }
+                val isBlacklistedDir =
+                        BLACKLISTED_DIRS.any { dir -> path.contains("/$dir/", ignoreCase = true) }
+                val isBlacklistedExt =
+                        BLACKLISTED_EXTENSIONS.any { ext ->
+                            path.endsWith(".$ext", ignoreCase = true)
+                        }
 
-                val song =
-                        mapOf<String, Any?>(
+                if (isBlacklistedDir || isBlacklistedExt) continue
+
+                songs.add(
+                        mapOf(
                                 "path" to path,
-                                "title" to it.getString(titleColumn),
-                                "artist" to it.getString(artistColumn),
-                                "album" to it.getString(albumColumn),
-                                "dateAdded" to
-                                        (if (it.isNull(dateAddedColumn)) null
-                                        else it.getLong(dateAddedColumn)),
-                                "duration" to
-                                        (if (it.isNull(durationColumn)) null
-                                        else it.getLong(durationColumn))
+                                "title" to it.getString(titleCol),
+                                "artist" to it.getString(artistCol),
+                                "album" to it.getString(albumCol),
+                                "dateAdded" to it.getLong(dateCol) * 1000,
+                                "duration" to it.getLong(durationCol)
                         )
-                songs.add(song)
+                )
             }
         }
-
         return songs
     }
 }

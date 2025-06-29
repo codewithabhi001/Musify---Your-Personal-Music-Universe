@@ -14,16 +14,21 @@ class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
   @override
-  _HomePageState createState() => _HomePageState();
+  State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final SongController controller = Get.find<SongController>();
   final PlayerController playerController = Get.find<PlayerController>();
 
-  late final PageController _pageController;
-  int _currentIndex = 0;
-  late final String _greeting = _getGreeting(); // FIXED
+  late TabController _tabController;
+
+  final List<({IconData icon, String? label})> _tabs = [
+    (icon: Icons.music_note_rounded, label: 'Songs'),
+    (icon: Icons.favorite_rounded, label: 'Favorites'),
+    (icon: Icons.person_rounded, label: 'Artists'),
+    (icon: Icons.album_rounded, label: 'Albums'),
+  ];
 
   final List<Widget> _pages = [
     AllSongsPage(),
@@ -32,264 +37,284 @@ class _HomePageState extends State<HomePage> {
     AlbumsPage(),
   ];
 
-  final List<Map<String, dynamic>> _navItems = [
-    {'text': 'Songs', 'icon': Icons.music_note_rounded},
-    {'text': 'Favorites', 'icon': Icons.favorite_rounded},
-    {'text': 'Artists', 'icon': Icons.person_rounded},
-    {'text': 'Albums', 'icon': Icons.album_rounded},
-  ];
-
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
-    _pageController.addListener(() {
-      final newIndex = _pageController.page?.round() ?? 0;
-      if (newIndex != _currentIndex) {
-        setState(() => _currentIndex = newIndex);
-      }
-    });
+    _tabController = TabController(length: _tabs.length, vsync: this);
   }
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    final isPlaying = playerController.currentSong.value != null;
+
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            Column(
-              children: [
-                Container(
-                  padding: EdgeInsets.fromLTRB(
-                      Get.width * 0.05, 10, Get.width * 0.05, 15),
-                  constraints: const BoxConstraints(minHeight: 80),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            // Header Section
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.fromLTRB(
+                screenWidth * 0.05,
+                16,
+                screenWidth * 0.05,
+                8,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Top Row with greeting and actions
+                  Row(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Good $_greeting',
-                                style: TextStyle(
-                                  fontSize: Get.width * 0.05,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurface
-                                      .withOpacity(0.7),
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                              Text(
-                                'Music Player',
-                                style: TextStyle(
-                                  fontSize: Get.width * 0.08,
-                                  fontWeight: FontWeight.bold,
-                                  color:
-                                      Theme.of(context).colorScheme.onSurface,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Row(
-                            children: [
-                              _buildActionButton(
-                                Icons.search_rounded,
-                                () => Get.to(() => SearchPage()),
-                              ),
-                              const SizedBox(width: 8),
-                              _buildMoreButton(context),
-                            ],
-                          ),
-                        ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Good ${_getGreeting()}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyLarge
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withOpacity(0.7),
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Music Player',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color:
+                                        Theme.of(context).colorScheme.onSurface,
+                                  ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 8),
-                      _buildNavigationBar(context),
+                      const SizedBox(width: 16),
+                      _buildActionButton(
+                        Icons.search_rounded,
+                        () => Get.to(() => SearchPage()),
+                      ),
+                      const SizedBox(width: 12),
+                      _buildMoreButton(),
                     ],
                   ),
-                ),
-                Expanded(
-                  child: Obx(() {
-                    final isPlaying =
-                        playerController.currentSong.value != null;
-                    return PageView(
-                      controller: _pageController,
-                      onPageChanged: (index) {
-                        setState(() => _currentIndex = index);
-                      },
-                      children: _pages.map((page) {
-                        return Padding(
-                          padding: EdgeInsets.only(bottom: isPlaying ? 60 : 10),
-                          child: page,
-                        );
-                      }).toList(),
-                    );
-                  }),
-                ),
-              ],
+                  const SizedBox(height: 20),
+
+                  // Custom Tab Bar
+                  _buildTabBar(),
+                ],
+              ),
             ),
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: MiniPlayer(),
+
+            // Content Section
+            Expanded(
+              child: Obx(() {
+                final needsBottomPadding =
+                    playerController.currentSong.value != null;
+                return Container(
+                  padding: EdgeInsets.only(bottom: needsBottomPadding ? 8 : 0),
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: _pages
+                        .map(
+                          (page) => Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: screenWidth * 0.02),
+                            child: page,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                );
+              }),
             ),
+
+            // Mini Player Section
+            Obx(() => playerController.currentSong.value != null
+                ? Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 10,
+                          offset: const Offset(0, -2),
+                        ),
+                      ],
+                    ),
+                    child: MiniPlayer(),
+                  )
+                : const SizedBox.shrink()),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildNavigationBar(BuildContext context) {
+  Widget _buildTabBar() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      height: 48,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(25),
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(24),
+        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
         border: Border.all(
           color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+          width: 1,
         ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: _navItems.asMap().entries.map((entry) {
-          final index = entry.key;
-          final item = entry.value;
-          final isSelected = _currentIndex == index;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => _pageController.jumpToPage(index),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: isSelected ? null : Colors.transparent,
-                ),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
+      child: TabBar(
+        controller: _tabController,
+        dividerColor: Colors.transparent,
+        indicator: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          color: Theme.of(context).colorScheme.primary,
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        labelColor: Theme.of(context).colorScheme.onPrimary,
+        unselectedLabelColor:
+            Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+        labelStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+        ),
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
+        tabs: _tabs
+            .map((tab) => Tab(
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        item['icon'],
-                        size: 16,
-                        color: isSelected
-                            ? Colors.white
-                            : Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withOpacity(0.6),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        item['text'],
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight:
-                              isSelected ? FontWeight.w600 : FontWeight.w500,
-                          color: isSelected
-                              ? Colors.white
-                              : Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withOpacity(0.6),
-                        ),
-                      ),
+                      Icon(tab.icon, size: 16),
+                      const SizedBox(width: 6),
                     ],
                   ),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
+                ))
+            .toList(),
       ),
     );
   }
 
   Widget _buildActionButton(IconData icon, VoidCallback onPressed) {
     return Container(
+      width: 44,
+      height: 44,
       decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(14),
+        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.7),
         border: Border.all(
           color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
         ),
       ),
-      child: IconButton(
-        icon: Icon(
-          icon,
-          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-          size: 24,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(14),
+          child: Icon(
+            icon,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            size: 20,
+          ),
         ),
-        onPressed: onPressed,
       ),
     );
   }
 
-  Widget _buildMoreButton(BuildContext context) {
+  Widget _buildMoreButton() {
     return Container(
+      width: 44,
+      height: 44,
       decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(14),
+        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.7),
         border: Border.all(
           color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
         ),
       ),
       child: PopupMenuButton<String>(
-        icon: Icon(
-          Icons.more_vert_rounded,
-          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-          size: 24,
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 8,
-        color: Theme.of(context).colorScheme.surface,
         onSelected: _handleMenuSelection,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        color: Theme.of(context).colorScheme.surface,
+        elevation: 12,
+        shadowColor: Colors.black.withOpacity(0.2),
+        offset: const Offset(0, 8),
+        child: Icon(
+          Icons.more_vert_rounded,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          size: 20,
+        ),
         itemBuilder: (context) => [
-          _buildPopupItem(Icons.refresh_rounded, 'Refresh Library', 'refresh'),
-          const PopupMenuDivider(),
-          _buildPopupItem(
+          _buildMenuItem(Icons.refresh_rounded, 'Refresh Library', 'refresh'),
+          const PopupMenuDivider(height: 1),
+          _buildMenuItem(
               Icons.sort_by_alpha_rounded, 'Name (A-Z)', 'sort_name_asc'),
-          _buildPopupItem(
+          _buildMenuItem(
               Icons.sort_by_alpha_rounded, 'Name (Z-A)', 'sort_name_desc'),
-          _buildPopupItem(Icons.person_rounded, 'By Artist', 'sort_artist'),
-          _buildPopupItem(
+          _buildMenuItem(Icons.person_rounded, 'By Artist', 'sort_artist'),
+          _buildMenuItem(
               Icons.access_time_rounded, 'Recently Added', 'sort_recent'),
         ],
       ),
     );
   }
 
-  PopupMenuItem<String> _buildPopupItem(
+  PopupMenuItem<String> _buildMenuItem(
       IconData icon, String text, String value) {
     return PopupMenuItem(
       value: value,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(6),
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
             ),
-            child: Icon(icon,
-                size: 18, color: Theme.of(context).colorScheme.primary),
+            child: Icon(
+              icon,
+              size: 16,
+              color: Theme.of(context).colorScheme.primary,
+            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 16),
           Expanded(
             child: Text(
               text,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -298,27 +323,26 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handleMenuSelection(String value) {
-    switch (value) {
-      case 'refresh':
-        controller.refreshSongs();
-        _showSnackBar('Refreshing library...');
-        break;
-      case 'sort_name_asc':
-        controller.sortSongs(SortType.nameAsc);
-        _showSnackBar('Sorted by name (A-Z)');
-        break;
-      case 'sort_name_desc':
-        controller.sortSongs(SortType.nameDesc);
-        _showSnackBar('Sorted by name (Z-A)');
-        break;
-      case 'sort_artist':
-        controller.sortSongs(SortType.artist);
-        _showSnackBar('Sorted by artist');
-        break;
-      case 'sort_recent':
-        controller.sortSongs(SortType.recent);
-        _showSnackBar('Sorted by recently added');
-        break;
+    final actions = {
+      'refresh': () => controller.refreshSongs(),
+      'sort_name_asc': () => controller.sortSongs(SortType.nameAsc),
+      'sort_name_desc': () => controller.sortSongs(SortType.nameDesc),
+      'sort_artist': () => controller.sortSongs(SortType.artist),
+      'sort_recent': () => controller.sortSongs(SortType.recent),
+    };
+
+    final messages = {
+      'refresh': 'Refreshing library...',
+      'sort_name_asc': 'Sorted by name (A-Z)',
+      'sort_name_desc': 'Sorted by name (Z-A)',
+      'sort_artist': 'Sorted by artist',
+      'sort_recent': 'Sorted by recently added',
+    };
+
+    actions[value]?.call();
+
+    if (messages[value] != null) {
+      _showSnackBar(messages[value]!);
     }
   }
 
@@ -341,16 +365,17 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour >= 5 && hour < 12) return 'Morning';
-    if (hour >= 12 && hour < 17) return 'Afternoon';
-    if (hour >= 17 && hour < 22) return 'Evening';
-    return 'Night';
+    return switch (DateTime.now().hour) {
+      >= 5 && < 12 => 'Morning',
+      >= 12 && < 17 => 'Afternoon',
+      >= 17 && < 22 => 'Evening',
+      _ => 'Night',
+    };
   }
 
   @override
   void dispose() {
-    _pageController.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 }

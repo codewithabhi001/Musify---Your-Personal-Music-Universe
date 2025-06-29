@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   audiotags
+  awesome_notifications
   flutter_audio_capture
   url_launcher_linux
 )

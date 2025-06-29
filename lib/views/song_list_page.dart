@@ -199,7 +199,7 @@ class _SongTile extends StatelessWidget {
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => playerController.play(song),
+          onTap: () => playerController.playSong(song),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(

@@ -6,7 +6,7 @@ import 'package:musify/controllers/player_controller.dart';
 import 'package:musify/controllers/favorite_controller.dart';
 import 'package:musify/controllers/song_controller.dart';
 
-class NowPlayingWidget extends StatelessWidget {
+class NowPlayingWidget extends StatefulWidget {
   final PlayerController playerController;
   final FavoriteController favoriteController;
   final SongController songController;
@@ -20,51 +20,33 @@ class NowPlayingWidget extends StatelessWidget {
     super.key,
   });
 
-  Future<Map<String, Color>> _extractColors(ui.Image image) async {
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-    if (byteData == null) return _getDefaultColorMap();
+  @override
+  _NowPlayingWidgetState createState() => _NowPlayingWidgetState();
+}
 
-    final data = byteData.buffer.asUint8List();
-    final Map<int, int> colorCount = {};
+class _NowPlayingWidgetState extends State<NowPlayingWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  String? _currentSongPath;
 
-    for (int i = 0; i < data.length; i += 16) {
-      final r = data[i];
-      final g = data[i + 1];
-      final b = data[i + 2];
-      final a = data[i + 3];
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+    _animationController.forward();
+  }
 
-      if (a < 200) continue;
-
-      final color = Color.fromARGB(255, r, g, b);
-      final luminance = color.computeLuminance();
-
-      if (luminance > 0.1 && luminance < 0.9) {
-        final colorKey = (r << 16) | (g << 8) | b;
-        colorCount[colorKey] = (colorCount[colorKey] ?? 0) + 1;
-      }
-    }
-
-    if (colorCount.isEmpty) return _getDefaultColorMap();
-
-    final dominantEntry =
-        colorCount.entries.reduce((a, b) => a.value > b.value ? a : b);
-    Color dominantColor = Color(0xFF000000 | dominantEntry.key);
-
-    final hsl = HSLColor.fromColor(dominantColor);
-    dominantColor = hsl
-        .withSaturation((hsl.saturation * 0.6).clamp(0.3, 0.8))
-        .withLightness(0.25)
-        .toColor();
-
-    final accentColor = hsl
-        .withSaturation((hsl.saturation * 0.8).clamp(0.4, 1.0))
-        .withLightness(0.35)
-        .toColor();
-
-    return {
-      'dominant': dominantColor,
-      'accent': accentColor,
-    };
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   Map<String, Color> _getDefaultColorMap() {
@@ -74,96 +56,75 @@ class NowPlayingWidget extends StatelessWidget {
     };
   }
 
-  Future<ui.Image> _loadImage(Uint8List data) async {
-    try {
-      final codec = await ui.instantiateImageCodec(data);
-      final frame = await codec.getNextFrame();
-      return frame.image;
-    } catch (e) {
-      debugPrint('Image loading error: $e');
-      return await _loadImageDefault();
-    }
-  }
-
-  Future<ui.Image> _loadImageDefault() async {
-    final codec = await ui.instantiateImageCodec(
-        (await rootBundle.load('assets/default_album_art.png'))
-            .buffer
-            .asUint8List());
-    final frame = await codec.getNextFrame();
-    return frame.image;
-  }
-
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final albumSize = (size.width * 0.65).clamp(280.0, 320.0);
 
     return Obx(() {
-      final currentSong = playerController.currentSong.value;
-      final future =
-          currentSong?.albumArt != null && currentSong!.albumArt!.isNotEmpty
-              ? _loadImage(currentSong.albumArt!).then(_extractColors)
-              : Future.value(_getDefaultColorMap());
+      final currentSong = widget.playerController.currentSong.value;
+      final songPath = currentSong?.path;
 
-      return FutureBuilder<Map<String, Color>>(
-        future: future,
-        builder: (context, snapshot) {
-          final colors = snapshot.data ?? _getDefaultColorMap();
-          final dominantColor = colors['dominant']!;
-          final accentColor = colors['accent']!;
+      if (songPath != _currentSongPath) {
+        _animationController.reset();
+        _animationController.forward();
+        _currentSongPath = songPath;
+      }
 
-          return Scaffold(
-            body: Container(
-              height: size.height,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    dominantColor.withOpacity(0.1),
-                    dominantColor.withOpacity(0.3),
-                    dominantColor.withOpacity(0.2),
-                    dominantColor.withOpacity(0.1),
-                  ],
-                ),
-              ),
-              child: SafeArea(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    return SingleChildScrollView(
-                      controller: scrollController,
-                      physics: const NeverScrollableScrollPhysics(),
-                      child: ConstrainedBox(
-                        constraints:
-                            BoxConstraints(minHeight: constraints.maxHeight),
-                        child: IntrinsicHeight(
-                          child: Column(
-                            children: [
-                              _buildHeader(context),
-                              const SizedBox(height: 20),
-                              _buildSongInfo(),
-                              const SizedBox(height: 30),
-                              _buildAlbumArt(albumSize, accentColor),
-                              const SizedBox(height: 30),
-                              _buildProgress(context),
-                              const SizedBox(height: 20),
-                              _buildControls(dominantColor),
-                              const Spacer(),
-                              SizedBox(
-                                  height:
-                                      MediaQuery.of(context).padding.bottom),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
+      final colors = songPath != null
+          ? widget.songController.getCachedColors(songPath)
+          : _getDefaultColorMap();
+      final dominantColor = colors['dominant']!;
+      final accentColor = colors['accent']!;
+
+      return Scaffold(
+        body: Container(
+          height: size.height,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                dominantColor.withOpacity(0.1),
+                dominantColor.withOpacity(0.3),
+                dominantColor.withOpacity(0.2),
+                dominantColor.withOpacity(0.1),
+              ],
             ),
-          );
-        },
+          ),
+          child: SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  controller: widget.scrollController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  child: ConstrainedBox(
+                    constraints:
+                        BoxConstraints(minHeight: constraints.maxHeight),
+                    child: IntrinsicHeight(
+                      child: Column(
+                        children: [
+                          _buildHeader(context),
+                          const SizedBox(height: 20),
+                          _buildSongInfo(),
+                          const SizedBox(height: 30),
+                          _buildAlbumArt(albumSize, accentColor),
+                          const SizedBox(height: 30),
+                          _buildProgress(context),
+                          const SizedBox(height: 20),
+                          _buildControls(dominantColor),
+                          const Spacer(),
+                          SizedBox(
+                              height: MediaQuery.of(context).padding.bottom),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
       );
     });
   }
@@ -202,7 +163,7 @@ class NowPlayingWidget extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Obx(() => Text(
-                playerController.currentSong.value?.title ?? 'No Song',
+                widget.playerController.currentSong.value?.title ?? 'No Song',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 22,
@@ -213,7 +174,8 @@ class NowPlayingWidget extends StatelessWidget {
               )),
           const SizedBox(height: 6),
           Obx(() => Text(
-                playerController.currentSong.value?.artist ?? 'Unknown Artist',
+                widget.playerController.currentSong.value?.artist ??
+                    'Unknown Artist',
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.8),
                   fontSize: 14,
@@ -229,26 +191,60 @@ class NowPlayingWidget extends StatelessWidget {
 
   Widget _buildAlbumArt(double size, Color accentColor) {
     return Hero(
-      tag: 'album_art_${playerController.currentSong.value?.id ?? 'default'}',
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Obx(() {
-            final albumArt = playerController.currentSong.value?.albumArt;
-            return albumArt != null && albumArt.isNotEmpty
-                ? Image.memory(albumArt,
-                    fit: BoxFit.cover, width: size, height: size)
-                : Container(
-                    color: accentColor,
-                    child: Icon(Icons.music_note,
-                        size: size * 0.3, color: Colors.white54),
-                  );
-          }),
+      tag:
+          'album_art_${widget.playerController.currentSong.value?.id ?? 'default'}',
+      child: FadeTransition(
+        opacity: _fadeAnimation,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Obx(() {
+              final song = widget.playerController.currentSong.value;
+              if (song == null) {
+                return Container(
+                  color: accentColor,
+                  child: Icon(Icons.music_note,
+                      size: size * 0.3, color: Colors.white54),
+                );
+              }
+              return FutureBuilder<Uint8List?>(
+                future: widget.songController.loadAlbumArt(song.path),
+                builder: (context, snapshot) {
+                  Widget imageWidget;
+                  if (snapshot.connectionState == ConnectionState.done &&
+                      snapshot.hasData &&
+                      snapshot.data != null) {
+                    imageWidget = Image.memory(
+                      snapshot.data!,
+                      fit: BoxFit.cover,
+                      width: size,
+                      height: size,
+                      errorBuilder: (context, error, stackTrace) {
+                        debugPrint('Album art render error: $error');
+                        return Container(
+                          color: accentColor,
+                          child: Icon(Icons.music_note,
+                              size: size * 0.3, color: Colors.white54),
+                        );
+                      },
+                    );
+                  } else {
+                    imageWidget = Container(
+                      color: accentColor,
+                      child: Icon(Icons.music_note,
+                          size: size * 0.3, color: Colors.white54),
+                    );
+                  }
+                  return imageWidget;
+                },
+              );
+            }),
+          ),
         ),
       ),
     );
@@ -259,9 +255,9 @@ class NowPlayingWidget extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Obx(() {
         final position =
-            playerController.position.value.inMilliseconds.toDouble();
+            widget.playerController.position.value.inMilliseconds.toDouble();
         final duration =
-            playerController.duration.value.inMilliseconds.toDouble();
+            widget.playerController.duration.value.inMilliseconds.toDouble();
         final effectiveDuration = duration > 0 ? duration : 1.0;
 
         return Column(
@@ -280,8 +276,8 @@ class NowPlayingWidget extends StatelessWidget {
                 value: position.clamp(0.0, effectiveDuration),
                 max: effectiveDuration,
                 onChanged: effectiveDuration > 0
-                    ? (v) =>
-                        playerController.seek(Duration(milliseconds: v.toInt()))
+                    ? (v) => widget.playerController
+                        .seek(Duration(milliseconds: v.toInt()))
                     : null,
               ),
             ),
@@ -290,14 +286,14 @@ class NowPlayingWidget extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  playerController
-                      .formatDuration(playerController.position.value),
+                  widget.playerController
+                      .formatDuration(widget.playerController.position.value),
                   style: TextStyle(
                       color: Colors.white.withOpacity(0.7), fontSize: 12),
                 ),
                 Text(
-                  playerController
-                      .formatDuration(playerController.duration.value),
+                  widget.playerController
+                      .formatDuration(widget.playerController.duration.value),
                   style: TextStyle(
                       color: Colors.white.withOpacity(0.7), fontSize: 12),
                 ),
@@ -319,14 +315,14 @@ class NowPlayingWidget extends StatelessWidget {
             children: [
               _buildSecondaryButton(
                 Icons.shuffle,
-                () => playerController.toggleShuffle(),
-                playerController.isShuffling,
+                () => widget.playerController.toggleShuffle(),
+                widget.playerController.isShuffling,
               ),
-              _buildFavoriteButton(),
+              // _buildFavoriteButton(),
               _buildSecondaryButton(
                 Icons.repeat,
-                () => playerController.toggleLoop(),
-                playerController.isLooping,
+                () => widget.playerController.toggleLoop(),
+                widget.playerController.isLooping,
               ),
             ],
           ),
@@ -335,9 +331,10 @@ class NowPlayingWidget extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _buildControlButton(
-                  Icons.skip_previous, playerController.playPrevious),
+                  Icons.skip_previous, widget.playerController.skipToPrevious),
               _buildPlayButton(dominantColor),
-              _buildControlButton(Icons.skip_next, playerController.playNext),
+              _buildControlButton(
+                  Icons.skip_next, widget.playerController.skipToNext),
             ],
           ),
         ],
@@ -369,29 +366,30 @@ class NowPlayingWidget extends StatelessWidget {
         ));
   }
 
-  Widget _buildFavoriteButton() {
-    return Obx(() {
-      final song = playerController.currentSong.value;
-      final isFav = song != null && favoriteController.isFavorite(song.path);
+  // Widget _buildFavoriteButton() {
+  //   return Obx(() {
+  //     final song = widget.playerController.currentSong.value;
+  //     final isFav =
+  //         song != null && widget.favoriteController.isFavorite(song.path);
 
-      return GestureDetector(
-        onTap: song != null
-            ? () {
-                favoriteController.toggleFavorite(song.path);
-                HapticFeedback.lightImpact();
-              }
-            : null,
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          child: Icon(
-            isFav ? Icons.favorite : Icons.favorite_border,
-            color: isFav ? Colors.redAccent : Colors.white.withOpacity(0.6),
-            size: 20,
-          ),
-        ),
-      );
-    });
-  }
+  //     return GestureDetector(
+  //       onTap: song != null
+  //           ? () {
+  //               widget.favoriteController.toggleFavorite(song.path);
+  //               HapticFeedback.lightImpact();
+  //             }
+  //           : null,
+  //       child: Container(
+  //         padding: const EdgeInsets.all(10),
+  //         child: Icon(
+  //           isFav ? Icons.favorite : Icons.favorite_border,
+  //           color: isFav ? Colors.redAccent : Colors.white.withOpacity(0.6),
+  //           size: 20,
+  //         ),
+  //       ),
+  //     );
+  //   );
+  // }
 
   Widget _buildControlButton(IconData icon, VoidCallback? onTap) {
     return GestureDetector(
@@ -410,9 +408,7 @@ class NowPlayingWidget extends StatelessWidget {
     return Obx(() => GestureDetector(
           onTap: () {
             HapticFeedback.mediumImpact();
-            playerController.isPlaying.value
-                ? playerController.pause()
-                : playerController.resume();
+            widget.playerController.togglePlayPause();
           },
           child: Container(
             padding: const EdgeInsets.all(18),
@@ -428,7 +424,9 @@ class NowPlayingWidget extends StatelessWidget {
               ],
             ),
             child: Icon(
-              playerController.isPlaying.value ? Icons.pause : Icons.play_arrow,
+              widget.playerController.isPlaying.value
+                  ? Icons.pause
+                  : Icons.play_arrow,
               color: Colors.white,
               size: 30,
             ),
