@@ -27,9 +27,6 @@ class PlayerController extends GetxController {
   List<int> _shuffledIndices = [];
   int _currentShuffleIndex = 0;
 
-  StreamSubscription? _positionSub;
-  StreamSubscription? _playingSub;
-  StreamSubscription? _durationSub;
   StreamSubscription? _playerStateSub;
 
   PlayerController() {
@@ -54,32 +51,28 @@ class PlayerController extends GetxController {
     try {
       await _player.setVolume(volume.value);
 
-      _playingSub = _player.playingStream.listen((playing) {
-        isPlaying.value = playing;
-        _notificationService.updateNotification();
-      });
-
-      _durationSub = _player.durationStream.listen((d) {
-        if (d != null && d.inMilliseconds > 0) {
-          duration.value = d;
-          _notificationService.updateNotification();
-        }
-      });
-
-      _positionSub = _player.positionStream.listen((p) {
-        if (p.inMilliseconds <= duration.value.inMilliseconds) {
-          position.value = p;
-          _notificationService.updateNotification();
-        }
-      });
-
       _playerStateSub = _player.playerStateStream.listen((state) {
+        isPlaying.value = state.playing;
         isBuffering.value =
             state.processingState == ProcessingState.buffering ||
                 state.processingState == ProcessingState.loading;
+
         if (state.processingState == ProcessingState.completed) {
           handleSongCompletion();
         }
+
+        _player.positionStream.first.then((p) {
+          if (p.inMilliseconds <= (duration.value.inMilliseconds + 100)) {
+            position.value = p;
+          }
+        });
+
+        _player.durationStream.first.then((d) {
+          if (d != null && d.inMilliseconds > 0) {
+            duration.value = d;
+          }
+        });
+
         _notificationService.updateNotification();
       });
 
@@ -133,13 +126,7 @@ class PlayerController extends GetxController {
       }
 
       await _saveState();
-      await _notificationService.showMediaNotification(
-        title: song.title,
-        artist: song.artist ?? 'Unknown Artist',
-        album: song.album,
-        imagePath: song.path,
-        isPlaying: _player.playing,
-      );
+      await _notificationService.updateNotification();
     } catch (e) {
       debugPrint('Play error: $e');
       Get.snackbar('Error', 'Cannot play this song',
@@ -396,9 +383,6 @@ class PlayerController extends GetxController {
 
   @override
   void dispose() {
-    _positionSub?.cancel();
-    _durationSub?.cancel();
-    _playingSub?.cancel();
     _playerStateSub?.cancel();
     _player.dispose();
     _notificationService.dispose();

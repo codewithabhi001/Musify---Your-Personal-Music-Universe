@@ -37,7 +37,7 @@ Future<void> main() async {
   );
 
   // Set notification listeners
-  await NotificationService.startListeningNotificationEvents();
+  // await NotificationService.startListeningNotificationEvents();
 
   // Initialize GetX controllers in correct order
   Get.put(SongController());
@@ -53,7 +53,7 @@ Future<void> requestPermissions() async {
   await [
     Permission.storage,
     Permission.audio,
-    Permission.manageExternalStorage,
+    // Permission.manageExternalStorage,
     Permission.notification,
   ].request();
 }
