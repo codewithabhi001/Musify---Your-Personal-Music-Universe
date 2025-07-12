@@ -67,6 +67,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Permission Handler Activity -->
+        <activity
+            android:name="com.baseflow.permissionhandler.PermissionHandlerActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- AudioService for background playback and notifications -->
         <service
             android:name="com.ryanheise.audioservice.AudioService"

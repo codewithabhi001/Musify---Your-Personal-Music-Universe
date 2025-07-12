@@ -4,24 +4,25 @@ import 'package:musify/controllers/player_controller.dart';
 import 'package:musify/controllers/song_controller.dart';
 import 'package:musify/controllers/favorite_controller.dart';
 import 'package:musify/model/song_model.dart';
+import 'package:musify/services/album_art_service.dart';
+import 'dart:typed_data';
 
-class AllSongsPage extends StatelessWidget {
-  final SongController songController = Get.find<SongController>();
+class AllSongsPage extends GetView<SongController> {
   final PlayerController playerController = Get.find<PlayerController>();
   final FavoriteController favoriteController = Get.find<FavoriteController>();
   final ScrollController _scrollController = ScrollController();
 
   AllSongsPage({super.key}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (songController.filteredSongs.isNotEmpty) {
-        songController.sortSongs(SortType.nameAsc);
+      if (controller.filteredSongs.isNotEmpty) {
+        controller.sortSongs(SortType.nameAsc);
         _scrollToLetter('A');
       }
     });
   }
 
   void _scrollToLetter(String letter) {
-    final index = songController.filteredSongs.indexWhere(
+    final index = controller.filteredSongs.indexWhere(
         (s) => s.title.isNotEmpty && s.title[0].toUpperCase() == letter);
     if (index != -1) {
       Future.delayed(const Duration(milliseconds: 300), () {
@@ -44,11 +45,11 @@ class AllSongsPage extends StatelessWidget {
             width: MediaQuery.of(context).size.width,
             height: MediaQuery.of(context).size.height,
             child: Obx(() {
-              if (songController.isLoading.value) {
+              if (controller.isLoading.value) {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              if (songController.filteredSongs.isEmpty) {
+              if (controller.filteredSongs.isEmpty) {
                 return const Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -65,21 +66,22 @@ class AllSongsPage extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   ListView.builder(
+                    physics: const BouncingScrollPhysics(),
                     controller: _scrollController,
                     padding: const EdgeInsets.only(right: 30, bottom: 10),
-                    itemCount: songController.filteredSongs.length,
+                    itemCount: controller.filteredSongs.length,
                     itemBuilder: (context, index) => _SongTile(
-                      key: ValueKey(songController.filteredSongs[index].id),
-                      song: songController.filteredSongs[index],
+                      key: ValueKey(controller.filteredSongs[index].id),
+                      song: controller.filteredSongs[index],
                       playerController: playerController,
                       favoriteController: favoriteController,
-                      songController: songController,
+                      songController: controller,
                     ),
                   ),
                   _AlphabetScrollBar(
                     scrollController: _scrollController,
-                    songs: songController.filteredSongs,
-                    songController: songController,
+                    songs: controller.filteredSongs,
+                    songController: controller,
                   ),
                 ],
               );
@@ -115,7 +117,40 @@ class _SongTile extends StatelessWidget {
         child: SizedBox(
           width: 50,
           height: 50,
-          child: songController.getAlbumArt(song: song, width: 50, height: 50),
+          child: FutureBuilder<Uint8List?>(
+            future: AlbumArtService().getAlbumArt(song.path),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return Container(
+                  width: 50,
+                  height: 50,
+                  color: Colors.grey.shade800,
+                  child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                );
+              }
+              if (snapshot.hasData && snapshot.data != null) {
+                return Image.memory(
+                  snapshot.data!,
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    width: 50,
+                    height: 50,
+                    color: Colors.grey.shade800,
+                    child:
+                        Icon(Icons.music_note, color: Colors.white, size: 28),
+                  ),
+                );
+              }
+              return Container(
+                width: 50,
+                height: 50,
+                color: Colors.grey.shade800,
+                child: Icon(Icons.music_note, color: Colors.white, size: 28),
+              );
+            },
+          ),
         ),
       ),
       title: Obx(() {
@@ -234,6 +269,7 @@ class _AlphabetScrollBar extends StatelessWidget {
           ],
         ),
         child: SingleChildScrollView(
+          physics: BouncingScrollPhysics(),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: letters.map((letter) {

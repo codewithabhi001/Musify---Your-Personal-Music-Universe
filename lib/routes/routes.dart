@@ -3,6 +3,7 @@ import 'package:musify/controllers/music_controller.dart';
 import 'package:musify/controllers/player_controller.dart';
 import 'package:musify/controllers/song_controller.dart';
 import 'package:musify/controllers/favorite_controller.dart';
+import 'package:musify/views/splash_screen.dart';
 import 'package:musify/views/home_screen.dart';
 import 'package:musify/views/search_page.dart';
 import 'package:musify/views/song_list_page.dart';
@@ -18,13 +19,32 @@ class MusicBindings extends Bindings {
   }
 }
 
+class SongBinding extends Bindings {
+  @override
+  void dependencies() {
+    Get.lazyPut<SongController>(() => SongController());
+  }
+}
+
+class PlayerBinding extends Bindings {
+  @override
+  void dependencies() {
+    Get.lazyPut<PlayerController>(() => PlayerController());
+  }
+}
+
 class AppRoutes {
+  static const SPLASH = '/';
   static const HOME = '/home';
   static const SEARCH = '/search';
   static const SONG_LIST = '/song-list';
   static const NOW_PLAYING = '/now-playing';
 
   static final routes = [
+    GetPage(
+      name: SPLASH,
+      page: () => const SplashScreen(),
+    ),
     GetPage(
       name: HOME,
       page: () => const HomePage(),
@@ -52,7 +72,6 @@ class AppRoutes {
 extension MusicControllerExtension on MusicController {
   NowPlayingWidget get nowPlayingWidget {
     return NowPlayingWidget(
-      playerController: playerController,
       favoriteController: favoriteController,
       songController: songController,
       scrollController: null, // Can be customized if needed

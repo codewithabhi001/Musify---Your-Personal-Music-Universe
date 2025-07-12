@@ -1,13 +1,15 @@
 import 'dart:io';
-import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:audiotags/audiotags.dart';
+
 import '../model/song_model.dart';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 class SongController extends GetxController {
   final songs = <SongModel>[].obs;
@@ -18,6 +20,9 @@ class SongController extends GetxController {
   int _androidSdkVersion = 0;
   bool _initialized = false;
   final RxList allSongs = [].obs;
+
+  // Debounced search
+  Timer? _searchDebounce;
 
   @override
   void onInit() {
@@ -34,7 +39,6 @@ class SongController extends GetxController {
       await _loadSongs();
     }
   }
-
 
   /// Reset filtered songs back to original songs list
   void resetSearch() {
@@ -53,7 +57,6 @@ class SongController extends GetxController {
     }
   }
 
-
   Future<void> _loadPreferences() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -69,17 +72,25 @@ class SongController extends GetxController {
       return;
     }
     try {
-      PermissionStatus status = _androidSdkVersion >= 33
-          ? await Permission.audio.status
-          : await Permission.storage.status;
-      if (status.isGranted) {
-        permissionGranted.value = true;
-        await _loadSongs();
-        return;
+      PermissionStatus status;
+      if (_androidSdkVersion >= 33) {
+        status = await Permission.audio.status;
+        if (status.isGranted) {
+          permissionGranted.value = true;
+          await _loadSongs();
+          return;
+        }
+        status = await Permission.audio.request();
+      } else {
+        status = await Permission.storage.status;
+        if (status.isGranted) {
+          permissionGranted.value = true;
+          await _loadSongs();
+          return;
+        }
+        status = await Permission.storage.request();
       }
-      status = _androidSdkVersion >= 33
-          ? await Permission.audio.request()
-          : await Permission.storage.request();
+
       if (status.isGranted) {
         permissionGranted.value = true;
         await _loadSongs();
@@ -90,6 +101,7 @@ class SongController extends GetxController {
     } catch (e) {
       debugPrint('Permission check error: $e');
       permissionGranted.value = false;
+      // Don't show error dialog for permission errors, just log them
     }
   }
 
@@ -145,26 +157,16 @@ class SongController extends GetxController {
     }
   }
 
+  // Use compute for loading cached songs if the list is large
   Future<void> _loadCachedSongs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final cachedSongs = prefs.getStringList('cachedSongs') ?? [];
       if (cachedSongs.isNotEmpty) {
-        final validSongs = <SongModel>[];
-        for (int i = 0; i < cachedSongs.length; i++) {
-          final parts = cachedSongs[i].split('|');
-          if (parts.length >= 2 && File(parts[0]).existsSync()) {
-            validSongs.add(SongModel(
-              title: parts[1],
-              artist: parts.length > 2 && parts[2].isNotEmpty ? parts[2] : null,
-              path: parts[0],
-              id: i,
-              dateAdded: DateTime.now().millisecondsSinceEpoch,
-              albumArt: null,
-              album: parts.length > 3 && parts[3].isNotEmpty ? parts[3] : null,
-            ));
-          }
-        }
+        // Use compute for parsing if list is large
+        final validSongs = cachedSongs.length > 200
+            ? await compute(_parseCachedSongsIsolate, cachedSongs)
+            : _parseCachedSongsIsolate(cachedSongs);
         songs.value = validSongs;
       }
     } catch (e) {
@@ -172,29 +174,34 @@ class SongController extends GetxController {
     }
   }
 
+  static List<SongModel> _parseCachedSongsIsolate(List<String> cachedSongs) {
+    final validSongs = <SongModel>[];
+    for (int i = 0; i < cachedSongs.length; i++) {
+      final parts = cachedSongs[i].split('|');
+      if (parts.length >= 2 && File(parts[0]).existsSync()) {
+        validSongs.add(SongModel(
+          title: parts[1],
+          artist: parts.length > 2 && parts[2].isNotEmpty ? parts[2] : null,
+          path: parts[0],
+          id: i,
+          dateAdded: DateTime.now().millisecondsSinceEpoch,
+          albumArt: null,
+          album: parts.length > 3 && parts[3].isNotEmpty ? parts[3] : null,
+        ));
+      }
+    }
+    return validSongs;
+  }
+
+  // Use compute for device fetch if list is large
   Future<void> _fetchSongsFromDevice() async {
     try {
       final List<dynamic>? nativeSongs =
           await platform.invokeListMethod('getSongs');
       if (nativeSongs != null && nativeSongs.isNotEmpty) {
-        final newSongs = <SongModel>[];
-        for (var i = 0; i < nativeSongs.length; i++) {
-          final song = nativeSongs[i] as Map<dynamic, dynamic>;
-          final path = song['path']?.toString();
-          if (path != null && File(path).existsSync()) {
-            final albumArt = await _loadAlbumArt(path);
-            newSongs.add(SongModel(
-              title: song['title']?.toString() ?? path.substringAfterLast('/'),
-              artist: song['artist']?.toString(),
-              path: path,
-              id: i,
-              dateAdded: int.tryParse(song['dateAdded']?.toString() ?? '') ??
-                  DateTime.now().millisecondsSinceEpoch,
-              albumArt: albumArt,
-              album: song['album']?.toString(),
-            ));
-          }
-        }
+        final newSongs = nativeSongs.length > 200
+            ? await compute(_parseNativeSongsIsolate, nativeSongs)
+            : _parseNativeSongsIsolate(nativeSongs);
         if (newSongs.isNotEmpty) {
           songs.value = newSongs;
         }
@@ -204,16 +211,25 @@ class SongController extends GetxController {
     }
   }
 
-  Future<Uint8List?> _loadAlbumArt(String path) async {
-    try {
-      final tag = await AudioTags.read(path);
-      if (tag?.pictures.isNotEmpty == true) {
-        return tag!.pictures.first.bytes;
+  static List<SongModel> _parseNativeSongsIsolate(List<dynamic> nativeSongs) {
+    final newSongs = <SongModel>[];
+    for (var i = 0; i < nativeSongs.length; i++) {
+      final song = nativeSongs[i] as Map<dynamic, dynamic>;
+      final path = song['path']?.toString();
+      if (path != null && File(path).existsSync()) {
+        newSongs.add(SongModel(
+          title: song['title']?.toString() ?? path.substringAfterLast('/'),
+          artist: song['artist']?.toString(),
+          path: path,
+          id: i,
+          dateAdded: int.tryParse(song['dateAdded']?.toString() ?? '') ??
+              DateTime.now().millisecondsSinceEpoch,
+          albumArt: null,
+          album: song['album']?.toString(),
+        ));
       }
-    } catch (e) {
-      debugPrint('Error loading album art for $path: $e');
     }
-    return null;
+    return newSongs;
   }
 
   Future<void> _cacheSongs() async {
@@ -233,24 +249,43 @@ class SongController extends GetxController {
   }
 
   void searchSongs(String query) {
-    final lowerQuery = query.toLowerCase();
-    filteredSongs.value = query.isEmpty
-        ? List<SongModel>.from(songs)
-        : songs
-            .where((song) =>
-                song.title.toLowerCase().contains(lowerQuery) ||
-                (song.artist?.toLowerCase().contains(lowerQuery) ?? false))
-            .toList();
-    sortSongs(SortType.nameAsc);
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () async {
+      final lowerQuery = query.toLowerCase();
+      final List<SongModel> baseList = List<SongModel>.from(songs);
+      if (query.isEmpty) {
+        filteredSongs.value = baseList;
+        sortSongs(SortType.nameAsc);
+        return;
+      }
+      // Use compute for heavy filtering
+      final result = await compute(
+          _filterSongsIsolate, {'songs': baseList, 'query': lowerQuery});
+      filteredSongs.value = result;
+      sortSongs(SortType.nameAsc);
+    });
   }
 
-  void sortSongs(SortType type) {
-    final sorted = List<SongModel>.from(filteredSongs);
-    _sortList(sorted, type);
+  static List<SongModel> _filterSongsIsolate(Map<String, dynamic> args) {
+    final List<SongModel> songs = List<SongModel>.from(args['songs']);
+    final String query = args['query'];
+    return songs
+        .where((song) =>
+            song.title.toLowerCase().contains(query) ||
+            (song.artist?.toLowerCase().contains(query) ?? false))
+        .toList();
+  }
+
+  Future<void> sortSongs(SortType type) async {
+    final List<SongModel> baseList = List<SongModel>.from(filteredSongs);
+    final sorted =
+        await compute(_sortSongsIsolate, {'songs': baseList, 'type': type});
     filteredSongs.value = sorted;
   }
 
-  void _sortList(List<SongModel> list, SortType type) {
+  static List<SongModel> _sortSongsIsolate(Map<String, dynamic> args) {
+    final List<SongModel> list = List<SongModel>.from(args['songs']);
+    final SortType type = args['type'];
     list.sort((a, b) {
       switch (type) {
         case SortType.nameAsc:
@@ -265,6 +300,7 @@ class SongController extends GetxController {
           return (b.dateAdded ?? 0).compareTo(a.dateAdded ?? 0);
       }
     });
+    return list;
   }
 
   Future<void> refreshSongs() async {
@@ -288,41 +324,5 @@ class SongController extends GetxController {
     return songs
         .where((song) => song.artist?.toLowerCase() == artist.toLowerCase())
         .toList();
-  }
-
-  // Added getAlbumArt method
-  Widget getAlbumArt({double? width, double? height, SongModel? song}) {
-    final targetSong = song ?? (songs.isNotEmpty ? songs.first : null);
-    final size = width ?? 54;
-
-    return targetSong?.albumArt != null
-        ? ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.memory(
-              targetSong!.albumArt!,
-              width: size,
-              height: height ?? size,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  _defaultAlbumArt(size, height),
-            ),
-          )
-        : _defaultAlbumArt(size, height);
-  }
-
-  Widget _defaultAlbumArt(double width, double? height) {
-    return Container(
-      width: width,
-      height: height ?? width,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        color: Colors.grey.shade800,
-      ),
-      child: Icon(
-        Icons.music_note,
-        size: width * 0.5,
-        color: Colors.white,
-      ),
-    );
   }
 }

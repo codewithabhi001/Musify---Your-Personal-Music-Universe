@@ -17,7 +17,7 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.musify/audio"
     private val TAG = "MusifyMainActivity"
-    private val PERMISSION_REQUEST_CODE = 123gg
+    private val PERMISSION_REQUEST_CODE = 123
 
     private val BLACKLISTED_DIRS =
             listOf(
@@ -163,40 +163,52 @@ class MainActivity : FlutterActivity() {
                 }
 
         cursor?.use {
-            val pathColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-            val titleColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artistColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val dateAddedColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
-            val durationColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            try {
+                val pathColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                val titleColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val dateAddedColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val durationColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
 
-            while (it.moveToNext()) {
-                val path = it.getString(pathColumn) ?: continue
-                val file = File(path)
-                if (!file.exists() || file.length() < 1024 * 50) continue
+                while (it.moveToNext()) {
+                    try {
+                        val path = it.getString(pathColumn) ?: continue
+                        val file = File(path)
+                        if (!file.exists() || file.length() < 1024 * 50) continue
 
-                if (BLACKLISTED_DIRS.any { dir -> path.contains("/$dir/", ignoreCase = true) } ||
-                                BLACKLISTED_EXTENSIONS.contains(
-                                        path.substringAfterLast('.', "").lowercase()
+                        if (BLACKLISTED_DIRS.any { dir -> path.contains("/$dir/", ignoreCase = true) } ||
+                                        BLACKLISTED_EXTENSIONS.contains(
+                                                path.substringAfterLast('.', "").lowercase()
+                                        )
+                        ) {
+                            continue
+                        }
+
+                        // Safe string extraction with null checks
+                        val title = it.getString(titleColumn) ?: "Unknown Title"
+                        val artist = it.getString(artistColumn) ?: "Unknown Artist"
+                        val album = it.getString(albumColumn) ?: "Unknown Album"
+                        val dateAdded = if (it.isNull(dateAddedColumn)) null else it.getLong(dateAddedColumn)
+                        val duration = if (it.isNull(durationColumn)) null else it.getLong(durationColumn)
+
+                        val song =
+                                mapOf<String, Any?>(
+                                        "path" to path,
+                                        "title" to title,
+                                        "artist" to artist,
+                                        "album" to album,
+                                        "dateAdded" to dateAdded,
+                                        "duration" to duration
                                 )
-                ) {
-                    continue
+                        songs.add(song)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing song at position ${it.position}: ${e.message}", e)
+                        continue
+                    }
                 }
-
-                val song =
-                        mapOf<String, Any?>(
-                                "path" to path,
-                                "title" to it.getString(titleColumn),
-                                "artist" to it.getString(artistColumn),
-                                "album" to it.getString(albumColumn),
-                                "dateAdded" to
-                                        (if (it.isNull(dateAddedColumn)) null
-                                        else it.getLong(dateAddedColumn)),
-                                "duration" to
-                                        (if (it.isNull(durationColumn)) null
-                                        else it.getLong(durationColumn))
-                        )
-                songs.add(song)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error reading cursor: ${e.message}", e)
             }
         }
 

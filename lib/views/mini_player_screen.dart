@@ -1,23 +1,22 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:musify/controllers/player_controller.dart';
 import 'package:musify/controllers/song_controller.dart';
 import 'now_playing_widget.dart';
 import 'dart:ui';
+import 'package:musify/services/album_art_service.dart';
 
-class MiniPlayer extends StatelessWidget {
-  final PlayerController? playerController =
-      Get.isRegistered<PlayerController>()
-          ? Get.find<PlayerController>()
-          : null; // Null-safe controller
+class MiniPlayer extends GetView<PlayerController> {
   final SongController songController =
       Get.find<SongController>(); // Non-nullable, assuming initialized
 
   MiniPlayer({super.key});
 
   void _showNowPlayingSheet(BuildContext context) {
-    if (playerController == null ||
-        playerController!.currentSong.value == null) {
+    if (controller == null ||
+        controller!.currentSong.value == null) {
       Get.snackbar('Error', 'No song is playing');
       return;
     }
@@ -43,9 +42,7 @@ class MiniPlayer extends StatelessWidget {
                     const BorderRadius.vertical(top: Radius.circular(16)),
               ),
               child: NowPlayingWidget(
-                playerController: playerController!,
-                favoriteController: Get
-                    .find(), // Replace with your actual FavoriteController if needed
+                favoriteController: Get.find(),
                 songController: songController,
               ),
             );
@@ -58,8 +55,8 @@ class MiniPlayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      if (playerController == null ||
-          playerController!.currentSong.value == null) {
+      if (controller == null ||
+          controller!.currentSong.value == null) {
         return const SizedBox.shrink();
       }
 
@@ -105,13 +102,41 @@ class MiniPlayer extends StatelessWidget {
                     children: [
                       Hero(
                         tag:
-                            'album_art_${playerController!.currentSong.value!.id}',
+                            'album_art_${controller!.currentSong.value!.id}',
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: songController.getAlbumArt(
-                            song: playerController!.currentSong.value,
-                            width: 50,
-                            height: 50,
+                          child: FutureBuilder<Uint8List?>(
+                            future: AlbumArtService().getAlbumArt(controller!.currentSong.value!.path),
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState == ConnectionState.waiting) {
+                                return Container(
+                                  width: 50,
+                                  height: 50,
+                                  color: Colors.grey.shade800,
+                                  child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                                );
+                              }
+                              if (snapshot.hasData && snapshot.data != null) {
+                                return Image.memory(
+                                  snapshot.data!,
+                                  width: 50,
+                                  height: 50,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => Container(
+                                    width: 50,
+                                    height: 50,
+                                    color: Colors.grey.shade800,
+                                    child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                                  ),
+                                );
+                              }
+                              return Container(
+                                width: 50,
+                                height: 50,
+                                color: Colors.grey.shade800,
+                                child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                              );
+                            },
                           ),
                         ),
                       ),
@@ -122,7 +147,7 @@ class MiniPlayer extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              playerController!.currentSong.value!.title,
+                              controller!.currentSong.value!.title,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context)
                                   .textTheme
@@ -132,10 +157,10 @@ class MiniPlayer extends StatelessWidget {
                                     fontWeight: FontWeight.bold,
                                   ),
                             ),
-                            if (playerController!.currentSong.value!.artist !=
+                            if (controller!.currentSong.value!.artist !=
                                 null)
                               Text(
-                                playerController!.currentSong.value!.artist!,
+                                controller!.currentSong.value!.artist!,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context)
                                     .textTheme
@@ -148,19 +173,19 @@ class MiniPlayer extends StatelessWidget {
                         ),
                       ),
                       _buildControlButton(context, Icons.skip_previous,
-                          playerController!.playPrevious),
+                          controller!.playPrevious),
                       _buildControlButton(
                         context,
-                        playerController!.isPlaying.value
+                        controller!.isPlaying.value
                             ? Icons.pause
                             : Icons.play_arrow,
-                        () => playerController!.isPlaying.value
-                            ? playerController!.pause()
-                            : playerController!.resume(),
+                        () => controller!.isPlaying.value
+                            ? controller!.pause()
+                            : controller!.resume(),
                         isPlayButton: true,
                       ),
                       _buildControlButton(
-                          context, Icons.skip_next, playerController!.playNext),
+                          context, Icons.skip_next, controller!.playNext),
                     ],
                   ),
                 ),

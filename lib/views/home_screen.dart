@@ -23,7 +23,7 @@ class _HomePageState extends State<HomePage> {
 
   late final PageController _pageController;
   int _currentIndex = 0;
-  late final String _greeting = _getGreeting(); // FIXED
+  late final String _greeting = _getGreeting();
 
   final List<Widget> _pages = [
     AllSongsPage(),
@@ -33,10 +33,10 @@ class _HomePageState extends State<HomePage> {
   ];
 
   final List<Map<String, dynamic>> _navItems = [
-    {'text': 'Songs', 'icon': Icons.music_note_rounded},
-    {'text': 'Favorites', 'icon': Icons.favorite_rounded},
-    {'text': 'Artists', 'icon': Icons.person_rounded},
-    {'text': 'Albums', 'icon': Icons.album_rounded},
+    {'text': 'Songs', 'icon': Icons.music_note_rounded, 'color': Colors.blue},
+    {'text': 'Favorites', 'icon': Icons.favorite_rounded, 'color': Colors.red},
+    {'text': 'Artists', 'icon': Icons.person_rounded, 'color': Colors.green},
+    {'text': 'Albums', 'icon': Icons.album_rounded, 'color': Colors.purple},
   ];
 
   @override
@@ -54,69 +54,20 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Stack(
           children: [
             Column(
               children: [
-                Container(
-                  padding: EdgeInsets.fromLTRB(
-                      Get.width * 0.05, 10, Get.width * 0.05, 15),
-                  constraints: const BoxConstraints(minHeight: 80),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Good $_greeting',
-                                style: TextStyle(
-                                  fontSize: Get.width * 0.05,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurface
-                                      .withOpacity(0.7),
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                              Text(
-                                'Music Player',
-                                style: TextStyle(
-                                  fontSize: Get.width * 0.08,
-                                  fontWeight: FontWeight.bold,
-                                  color:
-                                      Theme.of(context).colorScheme.onSurface,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Row(
-                            children: [
-                              _buildActionButton(
-                                Icons.search_rounded,
-                                () => Get.to(() => SearchPage()),
-                              ),
-                              const SizedBox(width: 8),
-                              _buildMoreButton(context),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      _buildNavigationBar(context),
-                    ],
-                  ),
-                ),
+                // Enhanced Header Section
+                _buildHeader(context),
+                // Enhanced Navigation Bar
+                _buildNavigationBar(context),
+                // Content Area
                 Expanded(
                   child: Obx(() {
-                    final isPlaying =
-                        playerController.currentSong.value != null;
+                    final isPlaying = playerController.currentSong.value != null;
                     return PageView(
                       controller: _pageController,
                       onPageChanged: (index) {
@@ -124,7 +75,7 @@ class _HomePageState extends State<HomePage> {
                       },
                       children: _pages.map((page) {
                         return Padding(
-                          padding: EdgeInsets.only(bottom: isPlaying ? 60 : 10),
+                          padding: EdgeInsets.only(bottom: isPlaying ? 80 : 20),
                           child: page,
                         );
                       }).toList(),
@@ -133,6 +84,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
+            // Mini Player
             Positioned(
               bottom: 0,
               left: 0,
@@ -145,64 +97,155 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildHeader(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Top Row with Greeting and Actions
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Greeting Section
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Good $_greeting',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Musify',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Your Personal Music Universe',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Action Buttons
+              Row(
+                children: [
+                  _buildActionButton(
+                    Icons.search_rounded,
+                    () => Get.to(() => SearchPage()),
+                    'Search',
+                  ),
+                  const SizedBox(width: 12),
+                  _buildMoreButton(context),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildNavigationBar(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(25),
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(16),
+        color: Theme.of(context).colorScheme.surface,
         border: Border.all(
           color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+          width: 1,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: _navItems.asMap().entries.map((entry) {
           final index = entry.key;
           final item = entry.value;
           final isSelected = _currentIndex == index;
+          
           return Expanded(
             child: GestureDetector(
               onTap: () => _pageController.jumpToPage(index),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: isSelected 
+                      ? LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            item['color'].withOpacity(0.8),
+                            item['color'],
+                          ],
+                        )
+                      : null,
                   color: isSelected ? null : Colors.transparent,
+                  boxShadow: isSelected ? [
+                    BoxShadow(
+                      color: item['color'].withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ] : null,
                 ),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        item['icon'],
-                        size: 16,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      item['icon'],
+                      size: 20,
+                      color: isSelected
+                          ? Colors.white
+                          : Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      item['text'],
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                         color: isSelected
                             ? Colors.white
-                            : Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withOpacity(0.6),
+                            : Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        item['text'],
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight:
-                              isSelected ? FontWeight.w600 : FontWeight.w500,
-                          color: isSelected
-                              ? Colors.white
-                              : Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withOpacity(0.6),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -212,22 +255,37 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildActionButton(IconData icon, VoidCallback onPressed) {
+  Widget _buildActionButton(IconData icon, VoidCallback onPressed, String tooltip) {
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
+        color: Theme.of(context).colorScheme.surface,
         border: Border.all(
           color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+          width: 1,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: IconButton(
-        icon: Icon(
-          icon,
-          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-          size: 24,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: onPressed,
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            child: Icon(
+              icon,
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
+              size: 24,
+            ),
+          ),
         ),
-        onPressed: onPressed,
       ),
     );
   }
@@ -236,15 +294,23 @@ class _HomePageState extends State<HomePage> {
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
+        color: Theme.of(context).colorScheme.surface,
         border: Border.all(
           color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+          width: 1,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: PopupMenuButton<String>(
         icon: Icon(
           Icons.more_vert_rounded,
-          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
           size: 24,
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -273,7 +339,7 @@ class _HomePageState extends State<HomePage> {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(6),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
@@ -327,7 +393,7 @@ class _HomePageState extends State<HomePage> {
       '',
       message,
       snackPosition: SnackPosition.BOTTOM,
-      backgroundColor: Theme.of(context).colorScheme.surface.withOpacity(0.9),
+      backgroundColor: Theme.of(context).colorScheme.surface.withOpacity(0.95),
       colorText: Theme.of(context).colorScheme.onSurface,
       margin: const EdgeInsets.all(16),
       borderRadius: 12,

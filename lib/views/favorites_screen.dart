@@ -4,9 +4,10 @@ import 'package:get/get.dart';
 import 'package:musify/controllers/player_controller.dart';
 import 'package:musify/controllers/song_controller.dart';
 import 'package:musify/controllers/favorite_controller.dart';
+import 'package:musify/services/album_art_service.dart';
+import 'dart:typed_data';
 
-class FavoritesWidget extends StatelessWidget {
-  final FavoriteController favoriteController = Get.find<FavoriteController>();
+class FavoritesWidget extends GetView<FavoriteController> {
   final PlayerController playerController = Get.find<PlayerController>();
   final SongController songController = Get.find<SongController>();
 
@@ -18,7 +19,7 @@ class FavoritesWidget extends StatelessWidget {
       body: Obx(
         () => songController.isLoading.value // Changed from favoriteController
             ? const Center(child: CircularProgressIndicator())
-            : favoriteController.filteredFavorites.isEmpty
+            : controller.filteredFavorites.isEmpty
                 ? Center(
                     child: Text(
                       'No Favorite Songs',
@@ -30,17 +31,45 @@ class FavoritesWidget extends StatelessWidget {
                   )
                 : ListView.builder(
                     cacheExtent: 1000,
-                    itemCount: favoriteController.filteredFavorites.length,
+                    itemCount: controller.filteredFavorites.length,
                     itemBuilder: (context, index) {
-                      final song = favoriteController.filteredFavorites[index];
+                      final song = controller.filteredFavorites[index];
                       final isPlaying =
                           playerController.currentSong.value?.id == song.id &&
                               playerController.isPlaying.value;
                       return ListTile(
-                        leading: songController.getAlbumArt(
-                          song: song,
-                          width: 54,
-                          height: 54,
+                        leading: FutureBuilder<Uint8List?>(
+                          future: AlbumArtService().getAlbumArt(song.path),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return Container(
+                                width: 54,
+                                height: 54,
+                                color: Colors.grey.shade800,
+                                child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                              );
+                            }
+                            if (snapshot.hasData && snapshot.data != null) {
+                              return Image.memory(
+                                snapshot.data!,
+                                width: 54,
+                                height: 54,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => Container(
+                                  width: 54,
+                                  height: 54,
+                                  color: Colors.grey.shade800,
+                                  child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                                ),
+                              );
+                            }
+                            return Container(
+                              width: 54,
+                              height: 54,
+                              color: Colors.grey.shade800,
+                              child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                            );
+                          },
                         ),
                         title: Text(
                           song.title,
@@ -64,7 +93,7 @@ class FavoritesWidget extends StatelessWidget {
                         trailing: IconButton(
                           icon: const Icon(Icons.favorite, color: Colors.red),
                           onPressed: () =>
-                              favoriteController.toggleFavorite(song.path),
+                              controller.toggleFavorite(song.path),
                         ),
                         onTap: () => playerController.play(song),
                       );
@@ -121,10 +150,38 @@ class FavoriteSearchDelegate extends SearchDelegate {
                         playerController.currentSong.value?.id == song.id &&
                             playerController.isPlaying.value;
                     return ListTile(
-                      leading: songController.getAlbumArt(
-                        song: song,
-                        width: 54,
-                        height: 54,
+                      leading: FutureBuilder<Uint8List?>(
+                        future: AlbumArtService().getAlbumArt(song.path),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Container(
+                              width: 54,
+                              height: 54,
+                              color: Colors.grey.shade800,
+                              child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                            );
+                          }
+                          if (snapshot.hasData && snapshot.data != null) {
+                            return Image.memory(
+                              snapshot.data!,
+                              width: 54,
+                              height: 54,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                width: 54,
+                                height: 54,
+                                color: Colors.grey.shade800,
+                                child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                              ),
+                            );
+                          }
+                          return Container(
+                            width: 54,
+                            height: 54,
+                            color: Colors.grey.shade800,
+                            child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                          );
+                        },
                       ),
                       title: Text(
                         song.title,

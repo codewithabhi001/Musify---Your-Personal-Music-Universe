@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:musify/controllers/song_controller.dart';
+import '../controllers/song_controller.dart';
 import 'package:musify/views/song_list_page.dart';
+import 'dart:typed_data';
+import 'package:musify/services/album_art_service.dart';
 
-class AlbumsPage extends StatelessWidget {
-  final SongController controller = Get.find<SongController>();
+class AlbumsPage extends GetView<SongController> {
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -44,10 +45,39 @@ class AlbumsPage extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12)),
                 leading: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: controller.getAlbumArt(
-                    width: 50,
-                    height: 50,
-                    song: songsInAlbum.first,
+                  child: FutureBuilder<Uint8List?>(
+                    future: AlbumArtService().getAlbumArt(songsInAlbum.first.path),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return Container(
+                          width: 50,
+                          height: 50,
+                          color: Colors.grey.shade800,
+                          child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                        );
+                      }
+                      if (snapshot.hasData && snapshot.data != null) {
+                        return Image.memory(
+                          snapshot.data!,
+                          width: 50,
+                          height: 50,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              Container(
+                                width: 50,
+                                height: 50,
+                                color: Colors.grey.shade800,
+                                child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                              ),
+                        );
+                      }
+                      return Container(
+                        width: 50,
+                        height: 50,
+                        color: Colors.grey.shade800,
+                        child: Icon(Icons.music_note, color: Colors.white, size: 28),
+                      );
+                    },
                   ),
                 ),
                 title: Text(

@@ -4,9 +4,10 @@ import 'package:get/get.dart';
 import 'package:musify/controllers/song_controller.dart';
 import 'package:musify/controllers/player_controller.dart';
 import 'package:musify/model/song_model.dart';
+import 'package:musify/services/album_art_service.dart';
+import 'dart:typed_data';
 
-class SongListPage extends StatelessWidget {
-  final SongController songController = Get.find<SongController>();
+class SongListPage extends GetView<SongController> {
   final PlayerController playerController = Get.find<PlayerController>();
   final String title;
   final List<SongModel> songs;
@@ -18,7 +19,9 @@ class SongListPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
         controller: _scrollController,
+        cacheExtent: 1000, // Increase cache extent for better performance
         slivers: [
           _buildSliverAppBar(context),
           _buildSongsList(context),
@@ -80,7 +83,7 @@ class SongListPage extends StatelessWidget {
 
   Widget _buildSongsList(BuildContext context) {
     return Obx(() {
-      if (songController.isLoading.value) {
+      if (controller.isLoading.value) {
         return const SliverFillRemaining(
           child: Center(child: CircularProgressIndicator()),
         );
@@ -88,6 +91,7 @@ class SongListPage extends StatelessWidget {
 
       if (songs.isEmpty) {
         return SliverFillRemaining(
+          hasScrollBody: false,
           child: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -132,15 +136,14 @@ class SongListPage extends StatelessWidget {
 
       return SliverPadding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-        sliver: SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) => _SongTile(
-              song: songs[index],
-              songController: songController,
-              playerController: playerController,
-              index: index,
-            ),
-            childCount: songs.length,
+        sliver: SliverList.builder(
+          itemCount: songs.length,
+          itemBuilder: (context, index) => _SongTile(
+            key: ValueKey(songs[index].id), // Add key for better performance
+            song: songs[index],
+            songController: controller,
+            playerController: playerController,
+            index: index,
           ),
         ),
       );
@@ -148,24 +151,70 @@ class SongListPage extends StatelessWidget {
   }
 }
 
-class _SongTile extends StatelessWidget {
+class _SongTile extends StatefulWidget {
   final SongModel song;
   final SongController songController;
   final PlayerController playerController;
   final int index;
 
   const _SongTile({
+    required Key key,
     required this.song,
     required this.songController,
     required this.playerController,
     required this.index,
-  });
+  }) : super(key: key);
+
+  @override
+  State<_SongTile> createState() => _SongTileState();
+}
+
+class _SongTileState extends State<_SongTile>
+    with AutomaticKeepAliveClientMixin {
+  Uint8List? _cachedAlbumArt;
+  bool _isLoadingAlbumArt = false;
+
+  @override
+  bool get wantKeepAlive => true; // Keep tiles alive for better scrolling
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAlbumArt();
+  }
+
+  Future<void> _loadAlbumArt() async {
+    if (_cachedAlbumArt != null || _isLoadingAlbumArt) return;
+
+    setState(() {
+      _isLoadingAlbumArt = true;
+    });
+
+    try {
+      final albumArt = await AlbumArtService().getAlbumArt(widget.song.path);
+      if (mounted) {
+        setState(() {
+          _cachedAlbumArt = albumArt;
+          _isLoadingAlbumArt = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingAlbumArt = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+
     return Obx(() {
-      final isPlaying = playerController.currentSong.value?.id == song.id &&
-          playerController.isPlaying.value;
+      final isPlaying =
+          widget.playerController.currentSong.value?.id == widget.song.id &&
+              widget.playerController.isPlaying.value;
 
       return Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -199,7 +248,7 @@ class _SongTile extends StatelessWidget {
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => playerController.play(song),
+          onTap: () => widget.playerController.play(widget.song),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
@@ -219,44 +268,49 @@ class _SongTile extends StatelessWidget {
   }
 
   Widget _buildAlbumArt(BuildContext context, bool isPlaying) {
+    if (_cachedAlbumArt != null) {
+      return Image.memory(
+        _cachedAlbumArt!,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+      );
+    }
+
+    if (_isLoadingAlbumArt) {
+      return Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade800,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return _buildPlaceholder();
+  }
+
+  Widget _buildPlaceholder() {
     return Container(
       width: 56,
       height: 56,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: Colors.grey.shade800,
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Stack(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child:
-                songController.getAlbumArt(song: song, width: 56, height: 56),
-          ),
-          if (isPlaying)
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: Colors.black.withOpacity(0.3),
-              ),
-              child: Center(
-                child: Icon(
-                  playerController.isPlaying.value
-                      ? Icons.pause
-                      : Icons.play_arrow,
-                  color: Colors.white,
-                  size: 24,
-                ),
-              ),
-            ),
-        ],
-      ),
+      child: const Icon(Icons.music_note, color: Colors.white, size: 28),
     );
   }
 
@@ -265,7 +319,7 @@ class _SongTile extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          song.title,
+          widget.song.title,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: isPlaying
@@ -280,7 +334,7 @@ class _SongTile extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                song.artist ?? 'Unknown Artist',
+                widget.song.artist ?? 'Unknown Artist',
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: isPlaying
