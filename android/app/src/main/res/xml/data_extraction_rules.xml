@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <!-- EXCLUDE shared preferences -->
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+
+    <!-- EXCLUDE database (direct file name only) -->
+    <exclude domain="database" path="app_database.db" />
+</data-extraction-rules>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- EXCLUDE shared preferences (FlutterSecureStorage) -->
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+
+    <!-- EXCLUDE database (only direct file name allowed) -->
+    <exclude domain="database" path="app_database.db" />
+</full-backup-content>

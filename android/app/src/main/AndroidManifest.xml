@@ -5,20 +5,30 @@
     <!-- Permissions for audio playback and notifications -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+        android:minSdkVersion="29" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"
+        android:minSdkVersion="33" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:minSdkVersion="31" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"
+        android:minSdkVersion="33" />
 
     <!-- Storage permissions for accessing audio files -->
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Android 13+ (API 33+) uses granular media permissions -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"
+        android:minSdkVersion="33" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"
+        android:minSdkVersion="33" />
+    <!-- Legacy storage permissions for older versions -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
+    <!-- All Files Access for Android 11+ (optional, use with caution) -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         android:minSdkVersion="30"
         tools:ignore="ScopedStorage" />
@@ -33,7 +43,10 @@
         android:usesCleartextTraffic="true"
         android:allowBackup="false"
         android:requestLegacyExternalStorage="true"
-        tools:targetApi="34">
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:localeConfig="@xml/locales_config"
+        tools:targetApi="35">
 
         <activity
             android:name=".MainActivity"
@@ -78,6 +91,7 @@
             android:name="com.ryanheise.audioservice.AudioService"
             android:foregroundServiceType="mediaPlayback"
             android:exported="true"
+            android:stopWithTask="false"
             tools:ignore="MissingClass">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />
